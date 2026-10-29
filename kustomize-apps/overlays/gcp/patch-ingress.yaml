@@ -1,0 +1,8 @@
+# Built-in GKE Ingress → external Google HTTP(S) Load Balancer. Health checks come from
+# each Service's pods' readinessProbe path.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: idea-board
+  annotations:
+    kubernetes.io/ingress.class: gce

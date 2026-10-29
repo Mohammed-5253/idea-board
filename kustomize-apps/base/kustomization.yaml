@@ -1,0 +1,28 @@
+# =============================================================================
+# kustomize-apps/base – the app, identical on every cloud.
+# Overlays (overlays/aws, overlays/gcp) = this base + small cloud-specific patches.
+# Render locally:  kubectl kustomize kustomize-apps/overlays/aws
+# Images are plain names `backend` / `frontend`; overlays set the registry + tag.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: idea-board
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: idea-board
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - configmap.yaml
+  - secret.yaml
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingress.yaml

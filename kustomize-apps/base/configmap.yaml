@@ -1,0 +1,18 @@
+# Non-secret settings for the backend (12-factor: config in env vars).
+# Overlays change per-cloud values (e.g. APP_ENV) with a patch.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  APP_ENV: base
+  LOG_LEVEL: INFO
+  # env = read DB_USER/DB_PASSWORD from environment variables (Secret backend-db).
+  # Later we can switch to `dapr` (fetch from AWS Secrets Manager / GCP Secret Manager).
+  DB_CREDENTIALS_SOURCE: env
+  DB_HOST: postgres # the in-cluster Postgres Service (postgres-service.yaml)
+  DB_PORT: "5432"
+  DB_NAME: ideas
+  # In-cluster Postgres has no TLS. Switch to `require` when we move to RDS / Cloud SQL.
+  DB_SSLMODE: disable
+  FAULT_INJECTION_RATE: "0"

@@ -1,0 +1,17 @@
+# Default disk type for PersistentVolumeClaims on EKS (Postgres uses it).
+# gp3 EBS volumes, created by the EBS CSI driver (installed by terraform/modules/aws/eks).
+# WaitForFirstConsumer: the disk is created in the SAME availability zone as the pod.
+# Retain: deleting the PVC keeps the EBS volume (protects the DB data from mistakes).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  encrypted: "true"

@@ -1,0 +1,11 @@
+# ALB via the AWS Load Balancer Controller (installed by terraform/modules/aws/alb-controller).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: idea-board
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip # send traffic straight to pod IPs
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+spec:
+  ingressClassName: alb
