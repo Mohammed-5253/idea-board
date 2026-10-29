@@ -24,3 +24,8 @@ output "github_ci_role_arn" {
   description = "Set as GitHub repository variable AWS_CI_ROLE_ARN."
   value       = module.github_oidc.role_arn
 }
+
+output "app_url" {
+  description = "Public HTTPS URL of the app (CloudFront)."
+  value       = var.enable_cloudfront ? module.cloudfront[0].url : null
+}

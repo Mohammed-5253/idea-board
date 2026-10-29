@@ -12,6 +12,7 @@ terraform/
     ├── aws/eks              EKS + managed node group (IRSA, network policies) + EBS CSI driver
     ├── aws/ecr              ECR repositories: backend, frontend
     ├── aws/github-oidc      GitHub Actions → AWS login without keys (CI role, ECR push only)
+    ├── aws/cloudfront       free HTTPS URL (*.cloudfront.net) in front of the app ALB
     ├── aws/alb-controller   AWS Load Balancer Controller (Ingress → ALB) + its IAM role
     ├── gcp/vpc              VPC, subnet (+ pod/service ranges), Cloud Router + NAT
     ├── gcp/gke              GKE Standard (zonal) + node pool (Workload Identity)

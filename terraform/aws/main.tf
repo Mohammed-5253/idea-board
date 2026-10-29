@@ -59,3 +59,11 @@ module "argocd" {
 
   depends_on = [module.alb_controller]
 }
+
+# Needs the ALB to exist first (created when Argo CD syncs the Ingress) → separate switch.
+module "cloudfront" {
+  source   = "../modules/aws/cloudfront"
+  count    = var.enable_cloudfront ? 1 : 0
+  name     = var.name
+  alb_name = var.name # = alb.ingress.kubernetes.io/load-balancer-name in overlays/aws
+}

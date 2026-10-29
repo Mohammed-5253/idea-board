@@ -97,3 +97,9 @@ variable "github_repo" {
   type        = string
   default     = "Mohammed-5253@106949872/idea-board@1438023010"
 }
+
+variable "enable_cloudfront" {
+  description = "HTTPS URL via CloudFront in front of the app's ALB. Turn on only after the ALB named var.name exists."
+  type        = bool
+  default     = false
+}
