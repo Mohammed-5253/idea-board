@@ -11,6 +11,7 @@
 .header h1 {
   margin: 0;
   font-size: 2rem;
+  color: var(--accent);
 }
 .subtitle {
   margin: 0.25rem 0 1.5rem;

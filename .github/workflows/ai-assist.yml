@@ -5,11 +5,14 @@ on:
   workflow_run:
     workflows: [ci]
     types: [completed]
+  push:
+    branches: [main]
+    paths: ["version.txt"] # version bump on main → GitHub Release v<version> with AI notes
 
 permissions: {}
 
 concurrency:
-  group: ai-${{ github.event.pull_request.number || github.event.workflow_run.id }}
+  group: ai-${{ github.event.pull_request.number || github.event.workflow_run.id || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -70,3 +73,35 @@ jobs:
             | python3 ci/ai/assist.py failure > explain.md
           { echo "## AI: why ci run $RUN_ID failed"; cat explain.md; } >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$PR" ]; then gh pr comment "$PR" --body-file explain.md; fi
+
+  # ---------------------------------------------------------------------------
+  release-notes:
+    name: ai · release notes for version.txt bump
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the tag + GitHub Release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history + tags → commits since the previous release
+          persist-credentials: false
+      - name: Create release with AI notes
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ vars.AI_BASE_URL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(tr -d '[:space:]' < version.txt)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::$tag already released – skipped"; exit 0
+          fi
+          prev="$(git describe --tags --abbrev=0 2>/dev/null || true)" # empty on the first release
+          # Skip the pipeline's own deploy(aws) tag-update commits; cap the list for the first release.
+          { echo "Version: $tag"; echo "Previous: ${prev:-none}";
+            git log --no-merges --format='- %s' "${prev:+$prev..}HEAD" | grep -v '^- deploy(aws)' | head -100; } \
+            | python3 ci/ai/assist.py release > notes.md
+          gh release create "$tag" --title "$tag" --notes-file notes.md --target "$GITHUB_SHA"
+          { echo "## Release $tag"; cat notes.md; } >> "$GITHUB_STEP_SUMMARY"
