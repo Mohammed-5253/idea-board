@@ -45,15 +45,3 @@ resource "google_compute_router_nat" "this" {
     filter = "ERRORS_ONLY"
   }
 }
-
-# The private control plane must reach the Dapr sidecar-injector webhook on the nodes.
-resource "google_compute_firewall" "dapr_webhook" {
-  name          = "${var.name}-dapr-webhook"
-  network       = google_compute_network.this.id
-  direction     = "INGRESS"
-  source_ranges = [var.master_cidr]
-  allow {
-    protocol = "tcp"
-    ports    = ["4000"]
-  }
-}

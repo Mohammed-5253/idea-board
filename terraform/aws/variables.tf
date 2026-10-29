@@ -1,3 +1,9 @@
+variable "aws_profile" {
+  description = "AWS CLI profile (~/.aws/credentials) Terraform uses."
+  type        = string
+  default     = "mkk"
+}
+
 variable "region" {
   description = "AWS region."
   type        = string
@@ -31,7 +37,7 @@ variable "kubernetes_version" {
 
 variable "node_instance_types" {
   type    = list(string)
-  default = ["t3.medium", "t3a.medium"]
+  default = ["t3.large", "t3a.large"]
 }
 
 variable "node_capacity_type" {
@@ -42,7 +48,7 @@ variable "node_capacity_type" {
 
 variable "node_count" {
   type    = number
-  default = 2
+  default = 1
 }
 
 variable "cluster_public_access_cidrs" {
@@ -51,10 +57,18 @@ variable "cluster_public_access_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+# --- add-ons (step 2: ALB controller, Argo CD) ---
+variable "install_addons" {
+  description = "false = build only VPC + EKS (step 1). Set true for the ALB controller and Argo CD."
+  type        = bool
+  default     = false
+}
+
 # --- Argo CD ---------------------------------------------------------------
 variable "git_repo_url" {
-  description = "Git repo Argo CD watches, e.g. https://github.com/<you>/idea-board.git"
+  description = "Git repo Argo CD watches (needed only when install_addons = true)."
   type        = string
+  default     = "https://github.com/Mohammed-5253/idea-board.git"
 }
 
 variable "git_revision" {
@@ -73,4 +87,13 @@ variable "git_token" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+# --- CI (GitHub Actions) ---------------------------------------------------
+variable "github_repo" {
+  # GitHub's OIDC `sub` uses owner@<owner-id>/repo@<repo-id> (immutable IDs: a renamed or
+  # re-created repo with the same name can't take over this role). IDs from CloudTrail.
+  description = "GitHub owner@id/repo@id whose main-branch workflows may push images (OIDC, no keys)."
+  type        = string
+  default     = "Mohammed-5253@106949872/idea-board@1438023010"
 }

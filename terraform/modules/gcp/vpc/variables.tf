@@ -20,8 +20,3 @@ variable "services_cidr" {
   description = "Service ClusterIPs (secondary range)."
   type        = string
 }
-
-variable "master_cidr" {
-  description = "The GKE control plane's /28 (allowed to call the Dapr webhook)."
-  type        = string
-}

@@ -1,7 +1,7 @@
 # =============================================================================
 # MODULE aws/vpc – VPC + subnets + NAT
-#   public  subnets (/20): internet-facing load balancers (ALB) and the NAT gateway
-#   private subnets (/19): EKS nodes and pods (VPC CNI gives every pod a VPC IP → big)
+#   public  subnets (/24): internet-facing load balancers (ALB) and the NAT gateway
+#   private subnets (/20): EKS nodes and pods (VPC CNI gives every pod a VPC IP → big)
 # One NAT gateway (~$33/month) lets private nodes pull images; production: one per AZ.
 # =============================================================================
 data "aws_availability_zones" "available" {
@@ -10,8 +10,8 @@ data "aws_availability_zones" "available" {
 
 locals {
   azs             = slice(data.aws_availability_zones.available.names, 0, var.az_count)
-  public_subnets  = [for i in range(var.az_count) : cidrsubnet(var.cidr, 4, i)]     # 10.10.0.0/20, 10.10.16.0/20
-  private_subnets = [for i in range(var.az_count) : cidrsubnet(var.cidr, 3, i + 2)] # 10.10.64.0/19, 10.10.96.0/19
+  public_subnets  = [for i in range(var.az_count) : cidrsubnet(var.cidr, 8, i)]     # 10.10.0.0/24, 10.10.1.0/24  (~250 IPs each)
+  private_subnets = [for i in range(var.az_count) : cidrsubnet(var.cidr, 4, i + 1)] # 10.10.16.0/20, 10.10.32.0/20 (~4,000 IPs each)
 }
 
 module "vpc" {

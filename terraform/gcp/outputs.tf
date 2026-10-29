@@ -10,7 +10,3 @@ output "kubeconfig_command" {
 output "vpc_name" {
   value = module.vpc.network_name
 }
-
-output "argocd_ui" {
-  value = "kubectl -n argocd port-forward svc/argocd-server 8080:80  →  http://localhost:8080 (user admin)"
-}

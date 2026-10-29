@@ -1,0 +1,35 @@
+# =============================================================================
+# FILE: dapr/components/local/resiliency.yaml
+# WHAT: Dapr Resiliency policy: timeouts + retries + circuit breaker for calls the app
+#       makes THROUGH the sidecar to the "secretstore" component (ADR-018).
+# WHY:  Cloud secret APIs occasionally throttle or blip. Declaring retries in YAML keeps
+#       that policy out of application code and identical on every cloud.
+# NOTE: the backend also retries while the sidecar itself starts (core/secrets.py) –
+#       Dapr resiliency covers sidecar→store, the app covers app→sidecar.
+# =============================================================================
+apiVersion: dapr.io/v1alpha1
+kind: Resiliency
+metadata:
+  name: idea-board-resiliency
+spec:
+  policies:
+    timeouts:
+      secretLookup: 5s
+    retries:
+      secretRetry:
+        policy: exponential
+        maxInterval: 5s
+        maxRetries: 5
+    circuitBreakers:
+      secretCB:
+        maxRequests: 1
+        interval: 30s
+        timeout: 30s
+        trip: consecutiveFailures >= 5
+  targets:
+    components:
+      secretstore:
+        outbound:
+          timeout: secretLookup
+          retry: secretRetry
+          circuitBreaker: secretCB

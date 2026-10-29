@@ -44,13 +44,41 @@ module "eks" {
   }
 }
 
-# The control plane must reach the Dapr sidecar-injector webhook on the nodes (port 4000).
-resource "aws_security_group_rule" "dapr_webhook" {
-  description              = "EKS control plane -> Dapr sidecar injector webhook"
-  type                     = "ingress"
-  protocol                 = "tcp"
-  from_port                = 4000
-  to_port                  = 4000
-  security_group_id        = module.eks.node_security_group_id
-  source_security_group_id = module.eks.cluster_security_group_id
+# =============================================================================
+# EBS CSI DRIVER – lets PersistentVolumeClaims create EBS disks (Postgres needs one).
+# It calls the EC2 API (create/attach volumes) → its own IAM role via IRSA, trusted ONLY
+# for its ServiceAccount kube-system/ebs-csi-controller-sa. Policy = AWS managed
+# AmazonEBSCSIDriverPolicy. Installed as an EKS add-on (AWS keeps it compatible with the
+# cluster version).
+# =============================================================================
+resource "aws_iam_role" "ebs_csi" {
+  name = "${var.name}-ebs-csi"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Federated = module.eks.oidc_provider_arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${module.eks.oidc_provider}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          "${module.eks.oidc_provider}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = aws_iam_role.ebs_csi.arn
+
+  # The controller pods need a running node group.
+  depends_on = [module.eks, aws_iam_role_policy_attachment.ebs_csi]
 }

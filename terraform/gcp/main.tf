@@ -1,6 +1,6 @@
 # =============================================================================
 # ROOT terraform/gcp – wires the modules together, in order:
-#   1. vpc  →  2. gke  →  3. dapr  →  4. argocd
+#   1. vpc  →  2. gke  →  3. argocd
 # (Ingress needs no extra controller on GKE: the built-in one creates a Google LB.)
 # Each module lives in ../modules. Change behaviour with variables (terraform.tfvars).
 # =============================================================================
@@ -19,7 +19,6 @@ module "vpc" {
   subnet_cidr   = var.subnet_cidr
   pods_cidr     = var.pods_cidr
   services_cidr = var.services_cidr
-  master_cidr   = var.master_cidr
   depends_on    = [google_project_service.apis]
 }
 
@@ -40,11 +39,6 @@ module "gke" {
   node_count          = var.node_count
 }
 
-module "dapr" {
-  source     = "../modules/common/dapr"
-  depends_on = [module.gke]
-}
-
 module "argocd" {
   source       = "../modules/common/argocd"
   git_repo_url = var.git_repo_url
@@ -52,5 +46,5 @@ module "argocd" {
   git_username = var.git_username
   git_token    = var.git_token
   app_path     = "kustomize-apps/overlays/gcp"
-  depends_on   = [module.dapr]
+  depends_on   = [module.gke]
 }

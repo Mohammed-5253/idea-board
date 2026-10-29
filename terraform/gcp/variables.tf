@@ -40,7 +40,7 @@ variable "services_cidr" {
 }
 
 variable "master_cidr" {
-  description = "/28 for the private control plane (must not overlap the ranges above)."
+  description = "/28 for the private GKE control plane (must not overlap the ranges above)."
   type        = string
   default     = "172.16.0.0/28"
 }

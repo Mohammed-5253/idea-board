@@ -1,0 +1,18 @@
+# =============================================================================
+# FILE: dapr/components/local/auditstore.yaml
+# WHAT: Dapr OUTPUT BINDING named "auditstore" – where in-cluster components write AI audit
+#       records (ADR-018 / D-47). Locally: files under /tmp/audit inside the sidecar.
+#         local → bindings.localstorage · AWS → bindings.aws.s3 · GCP → bindings.gcp.bucket
+# WHY NOW? The backend does not use it yet (AI features arrive in Phase 9). Declaring it
+#   locally proves the "same name, different backend" pattern from day one.
+# =============================================================================
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: auditstore
+spec:
+  type: bindings.localstorage
+  version: v1
+  metadata:
+    - name: rootPath
+      value: /tmp/audit

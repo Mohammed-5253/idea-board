@@ -1,0 +1,53 @@
+# =============================================================================
+# Root .gitignore – keep secrets, local state and build output out of Git.
+# SECURITY NOTE: .env and .secrets.json hold local credentials; NEVER commit them.
+#                gitleaks (pre-commit + CI, Phase 5) is the second line of defence.
+# =============================================================================
+# Secrets / local config
+.env
+.env.*
+!.env.example
+**/.secrets.json
+*.pem
+*.key
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Terraform (lock file IS committed; state and plans are NOT)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Generated SBOMs (CI uploads them as artifacts)
+sbom/
+
+# Terraform per-user config (examples are committed)
+**/backend.hcl
+**/terraform.tfvars
+# Lock files are committed for ROOT stacks only (modules inherit the root's selections)
+infra/modules/**/.terraform.lock.hcl
+
+# Rendered manifests for scanning (make scan-manifests)
+build/
