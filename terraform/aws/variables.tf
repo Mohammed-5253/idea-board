@@ -99,7 +99,7 @@ variable "github_repo" {
 }
 
 variable "enable_cloudfront" {
-  description = "HTTPS URL via CloudFront in front of the app's ALB. Turn on only after the ALB named var.name exists."
+  description = "HTTPS URL via CloudFront in front of the app's ALB. Turn on only after Argo CD has created the app Ingress (and its ALB)."
   type        = bool
   default     = false
 }

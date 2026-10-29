@@ -3,11 +3,15 @@
 # CloudFront terminates HTTPS with its own free *.cloudfront.net certificate and forwards
 # every request to the ALB over HTTP (the ALB has no certificate: that needs a domain).
 # No caching: the API is dynamic; every request goes to the app.
-# The ALB is created by Kubernetes (Ingress), not Terraform → looked up by its fixed name
-# (annotation alb.ingress.kubernetes.io/load-balancer-name in kustomize-apps/overlays/aws).
+# The ALB is created by Kubernetes (Ingress), not Terraform → looked up by the tag the AWS
+# Load Balancer Controller puts on it (ingress.k8s.aws/stack = <namespace>/<ingress name>).
+# The controller never renames an existing ALB, so a name lookup is unreliable.
 # =============================================================================
 data "aws_lb" "app" {
-  name = var.alb_name
+  tags = {
+    "ingress.k8s.aws/stack" = var.ingress
+    "elbv2.k8s.aws/cluster" = var.cluster_name
+  }
 }
 
 data "aws_cloudfront_cache_policy" "disabled" {

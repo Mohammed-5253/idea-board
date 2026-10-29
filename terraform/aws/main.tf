@@ -62,8 +62,9 @@ module "argocd" {
 
 # Needs the ALB to exist first (created when Argo CD syncs the Ingress) → separate switch.
 module "cloudfront" {
-  source   = "../modules/aws/cloudfront"
-  count    = var.enable_cloudfront ? 1 : 0
-  name     = var.name
-  alb_name = var.name # = alb.ingress.kubernetes.io/load-balancer-name in overlays/aws
+  source       = "../modules/aws/cloudfront"
+  count        = var.enable_cloudfront ? 1 : 0
+  name         = var.name
+  cluster_name = module.eks.cluster_name
+  ingress      = "idea-board/idea-board" # kustomize-apps Ingress (namespace/name)
 }

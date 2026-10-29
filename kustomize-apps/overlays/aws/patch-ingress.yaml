@@ -7,8 +7,5 @@ metadata:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip # send traffic straight to pod IPs
     alb.ingress.kubernetes.io/healthcheck-path: /healthz
-    # Fixed ALB name so Terraform (modules/aws/cloudfront) can find it as the CloudFront origin.
-    # Changing it replaces the ALB (new DNS name).
-    alb.ingress.kubernetes.io/load-balancer-name: idea-board
 spec:
   ingressClassName: alb

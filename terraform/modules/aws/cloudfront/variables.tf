@@ -2,7 +2,11 @@ variable "name" {
   type = string
 }
 
-variable "alb_name" {
-  description = "Name of the ALB created by the Ingress (load-balancer-name annotation)."
+variable "cluster_name" {
+  type = string
+}
+
+variable "ingress" {
+  description = "<namespace>/<name> of the Ingress whose ALB is the origin."
   type        = string
 }
