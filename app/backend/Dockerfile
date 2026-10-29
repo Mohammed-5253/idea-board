@@ -96,6 +96,11 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app migrations ./migrations
 
+# Image tag passed by CI (--build-arg APP_VERSION=<tag>); served at GET /api/version.
+# Declared late so a new tag only rebuilds this tiny layer, not the dependency layers.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 USER 10001:10001
 EXPOSE 8000
 

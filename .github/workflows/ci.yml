@@ -148,6 +148,7 @@ jobs:
           platforms: linux/amd64 # EKS nodes are x86_64 (t3.large)
           push: true
           tags: ${{ env.REPO }}:${{ env.TAG }}
+          build-args: APP_VERSION=${{ env.TAG }} # backend serves it at /api/version; frontend ignores it
           labels: |
             org.opencontainers.image.version=${{ env.TAG }}
             org.opencontainers.image.revision=${{ github.sha }}
