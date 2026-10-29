@@ -1,0 +1,10 @@
+# Argo CD Helm values – used on EKS and GKE (this module is shared).
+configs:
+  params:
+    # No public Argo CD URL: open the UI with
+    #   kubectl -n argocd port-forward svc/argocd-server 8080:80
+    server.insecure: true
+dex:
+  enabled: false # no SSO; log in as admin (password: argocd-initial-admin-secret)
+notifications:
+  enabled: false

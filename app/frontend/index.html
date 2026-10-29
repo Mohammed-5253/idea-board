@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  FILE: app/frontend/index.html
+  WHAT: The single HTML page of the SPA. Vite injects the bundled JS/CSS at build time.
+  WHY /config.js BEFORE the app bundle?  Runtime configuration (D-03): the container
+       entrypoint (Phase 4) writes /config.js from environment variables at START time,
+       so ONE image digest works on local, AWS and GCP. Build-time env vars (VITE_*) would
+       be frozen into the bundle and force a rebuild per environment.
+  SECURITY NOTE: config.js must never contain secrets – everything shipped to a browser
+       is public. It only holds non-sensitive settings such as an optional API base URL.
+  LEARN: docs/learning/11-frontend-react-vite-typescript.md §5 (build-time vs runtime config)
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Idea Board – share and browse ideas" />
+    <title>Idea Board</title>
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <noscript>Idea Board needs JavaScript enabled.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

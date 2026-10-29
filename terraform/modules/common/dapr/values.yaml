@@ -1,0 +1,19 @@
+# Dapr Helm values – used on EKS and GKE (this module is shared).
+# Demo settings: 1 replica of each control-plane pod, mTLS on, no persistent storage
+# (scheduler/placement in memory, so no PersistentVolume / CSI driver is needed).
+global:
+  logAsJson: true
+  ha:
+    enabled: false
+  mtls:
+    enabled: true
+# The app namespace enforces Pod Security "restricted" → the injected sidecar must drop
+# all Linux capabilities or the pod is rejected.
+dapr_sidecar_injector:
+  sidecarDropALLCapabilities: true
+dapr_scheduler:
+  cluster:
+    inMemoryStorage: true
+dapr_placement:
+  cluster:
+    forceInMemoryLog: true

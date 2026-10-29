@@ -1,0 +1,126 @@
+# =============================================================================
+# FILE: app/backend/pyproject.toml
+# WHAT: Project definition for the Idea Board backend (Python package
+#       `idea_board`): runtime dependencies, dev dependencies, and the
+#       configuration of every Python quality tool (Ruff, mypy, pytest, coverage).
+# WHY:  One file = one source of truth. `uv` reads it to create the virtual
+#       environment and writes the exact resolved versions to `uv.lock`
+#       (hash-pinned → reproducible builds, ADR-012 / D-42).
+# WHERE IT FITS: Part 1 of the spec (backend). The Dockerfile (Phase 4) runs
+#       `uv sync --frozen` against the lockfile, so the container gets exactly
+#       what was tested.
+# HOW TO USE:
+#   uv sync                 # create .venv with runtime + dev deps from uv.lock
+#   uv run pytest           # run tests
+#   uv add <pkg>            # ONLY after the package is approved in the Bill of Tools
+# COMMON MISTAKE: editing versions here and forgetting `uv lock` → CI fails
+#       with "lockfile out of date". Always run `uv lock` (or `uv add`).
+# LEARN: docs/learning/10-backend-python-fastapi.md §5 and §7
+# =============================================================================
+
+[project]
+name = "idea-board-backend"
+version = "0.1.0"
+description = "Idea Board REST API: GET/POST /api/ideas backed by PostgreSQL."
+readme = "README.md"
+# Python 3.13 line (ADR-012). The upper bound stops a silent jump to 3.14
+# before we have verified all wheels exist for it.
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "alembic>=1.20.1",
+    "fastapi>=0.162.0",
+    "opentelemetry-api>=1.45.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-exporter-prometheus>=0.66b1",
+    "opentelemetry-instrumentation-fastapi>=0.66b1",
+    "opentelemetry-sdk>=1.45.1",
+    "psycopg[binary]>=3.3.6",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.1",
+    "sqlalchemy>=2.1.6",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+# Console entry points used by Jobs/compose (`uv run idea-board-seed` …).
+idea-board-seed = "idea_board.scripts.seed:main"
+idea-board-db-bootstrap = "idea_board.scripts.db_bootstrap:main"
+
+# Build backend: uv's own `uv_build` (part of the approved uv tool, D-42),
+# so no extra build tool (hatchling/setuptools) enters the Bill of Tools.
+# ALTERNATIVE: hatchling – more features, but another dependency to approve.
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# The distribution is "idea-board-backend" but the import package is
+# `idea_board` (src/idea_board). Tell uv_build where it lives.
+module-name = "idea_board"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.4.0",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.3",
+    "testcontainers[postgres]>=4.15.0",
+]
+
+# ----------------------------------------------------------------------------
+# Ruff: linter + formatter (ADR-032). Rules chosen to catch real bugs
+# (pyflakes, bugbear), security smells (bandit "S"), and keep imports tidy.
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "C4", "SIM", "RUF", "N"]
+ignore = [
+  "S101",  # `assert` is how pytest works; allowed (and only) in tests via per-file below
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]  # asserts + dummy passwords are fine in tests
+"migrations/**" = ["N999"]            # Alembic revision file names start with digits
+
+# ----------------------------------------------------------------------------
+# mypy strict: types are part of the API contract (IdeaOut, settings…).
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["idea_board"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# testcontainers and the OTel Prometheus exporter ship without complete type
+# hints; we isolate that here instead of sprinkling `type: ignore`.
+module = ["testcontainers.*", "opentelemetry.exporter.prometheus.*", "prometheus_client.*"]
+ignore_missing_imports = true
+
+# ----------------------------------------------------------------------------
+# pytest: three test layers (unit / integration / contract) – ADR-032.
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --cov=idea_board --cov-report=term-missing"
+filterwarnings = [
+  # Starlette now recommends `httpx2` for its TestClient. Our approved test client is
+  # httpx (D-05); switching needs a Bill-of-Tools change, tracked for Phase 4. Until then
+  # we silence ONLY this specific warning (every other warning stays visible).
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated:DeprecationWarning",
+]
+markers = [
+  "integration: needs Docker (Testcontainers starts a real PostgreSQL 17)",
+  "contract: guards the spec's API contract and table schema",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["idea_board"]

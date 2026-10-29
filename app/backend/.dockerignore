@@ -1,0 +1,19 @@
+# =============================================================================
+# app/backend/.dockerignore – what NEVER enters the Docker build context.
+# WHY: (1) smaller, faster builds; (2) SECURITY: local secrets (.env) and caches must
+#      not leak into image layers (anything COPYed is recoverable from the image).
+# =============================================================================
+.env
+.env.*
+!.env.example
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tests/
+Dockerfile
+.dockerignore

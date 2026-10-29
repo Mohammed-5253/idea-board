@@ -1,0 +1,31 @@
+// =============================================================================
+// FILE: app/frontend/tsconfig.json   (JSONC: TypeScript allows comments here)
+// WHAT: TypeScript compiler settings for the SPA, the Vite config and the tests.
+// WHY:  `strict` typing turns API-contract mistakes (e.g. treating `created_at` as a
+//       Date instead of an ISO string) into build errors instead of runtime bugs.
+//       Vite does the actual bundling (esbuild/Rolldown); `tsc --noEmit` only TYPE-CHECKS.
+// VERSION NOTE: TypeScript 5.9.x (approved 5.x line). TS 6/7 exist, but typescript-eslint
+//       currently supports < 6.1, so upgrading waits for the lint ecosystem (Dependabot PR).
+// LEARN: docs/learning/11-frontend-react-vite-typescript.md §6
+// =============================================================================
+{
+  "compilerOptions": {
+    "target": "ES2022", // modern browsers + Node 24 understand ES2022
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler", // resolve imports the way Vite does
+    "jsx": "react-jsx", // React 17+ automatic JSX runtime (no `import React`)
+    "strict": true, // all strict checks (null safety, implicit any, ...)
+    "noUncheckedIndexedAccess": true, // arr[i] is `T | undefined` → forces bounds thinking
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true, // `import type` must be explicit → smaller bundles
+    "isolatedModules": true, // each file transpilable alone (required by Vite)
+    "skipLibCheck": true, // don't type-check node_modules .d.ts (speed)
+    "noEmit": true,
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": ["src", "vite.config.ts"]
+}

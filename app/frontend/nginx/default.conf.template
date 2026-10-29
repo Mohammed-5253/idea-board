@@ -1,0 +1,101 @@
+# =============================================================================
+# FILE: app/frontend/nginx/default.conf.template
+# WHAT: NGINX server config for the SPA. The official image's entrypoint runs `envsubst`
+#       on /etc/nginx/templates/*.template at START, replacing ${VARS} that are defined in
+#       the environment (others like $uri are left alone), and writes /etc/nginx/conf.d/.
+# INPUT ENV: BACKEND_UPSTREAM (e.g. http://backend:8000), API_BASE_URL (CSP connect-src),
+#            NGINX_LOCAL_RESOLVERS (auto-filled from /etc/resolv.conf by the official
+#            15-local-resolvers.envsh because the Dockerfile sets NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1).
+# WHERE IT FITS:
+#   docker-compose → browser → nginx :8080 → /api proxied to backend:8000 (same origin)
+#   Kubernetes     → Envoy Gateway routes /api DIRECTLY to the backend Service; this
+#                    proxy block is then only a fallback (the Service is also named
+#                    "backend", so the upstream still resolves).
+# RUNTIME DNS: proxy_pass uses a VARIABLE + `resolver`, so NGINX resolves the backend at
+#   REQUEST time. IF the backend doesn't exist yet (Argo CD sync order, compose start
+#   order) THEN NGINX still starts and /api returns 502 until it appears – instead of
+#   crash-looping with "host not found in upstream" (found in Phase 4 hardening tests).
+# BUT: NGINX's resolver ignores DNS search domains → in Kubernetes BACKEND_UPSTREAM must be
+#   the FQDN, e.g. http://backend.idea-board-prod.svc.cluster.local:8000 (Phase 6 overlays).
+#   Docker's embedded DNS (compose) resolves the short name "backend" directly.
+# LEARN: docs/learning/12-containers-docker.md §6
+# =============================================================================
+
+# One JSON object per access-log line (same convention as the backend's structlog),
+# shipped by the OTel Collector. No query strings or bodies (privacy).
+log_format json_access escape=json
+  '{"ts":"$time_iso8601","level":"info","logger":"nginx","event":"request",'
+  '"method":"$request_method","route":"$uri","status":$status,'
+  '"duration_ms":$request_time,"bytes":$body_bytes_sent,"request_id":"$request_id"}';
+
+server {
+    listen 8080;                 # unprivileged port: the container runs as UID 101, not root
+    server_name _;
+    root /usr/share/nginx/html;
+    server_tokens off;           # don't advertise the NGINX version (SECURITY NOTE)
+    access_log /dev/stdout json_access;
+
+    # Ideas are tiny; reject big bodies early (protects the backend from abuse).
+    client_max_body_size 16k;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # --- Security headers (every response) ---------------------------------------------
+    # CSP: only our own origin may supply scripts/styles; API calls go to 'self'
+    # (plus API_BASE_URL if ever configured). Blocks injected third-party scripts (XSS).
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${API_BASE_URL}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # HSTS is intentionally NOT set here: TLS terminates at Envoy Gateway, which sets it.
+
+    # --- Liveness/readiness for Docker & Kubernetes probes -------------------------------
+    location = /healthz {
+        access_log off;
+        default_type application/json;
+        return 200 '{"status":"ok"}';
+    }
+
+    # --- Runtime configuration (generated at container start, see 40-runtime-config.sh) --
+    # Served from /tmp so the root filesystem can be read-only in Kubernetes.
+    location = /config.js {
+        alias /tmp/runtime-config/config.js;
+        default_type application/javascript;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    # --- API proxy (same-origin /api → backend) ------------------------------------------
+    location /api/ {
+        resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+        resolver_timeout 2s;
+        set $backend_upstream ${BACKEND_UPSTREAM};
+        # With a variable and no URI part, the original request URI (/api/...) is passed on.
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;   # correlates nginx and backend logs
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 15s;   # backend statement_timeout is 5 s; leave headroom
+    }
+
+    # --- Static assets: content-hashed file names → cache "forever" ----------------------
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # --- SPA entry: never cache index.html (it references the current hashed assets) ----
+    location / {
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${API_BASE_URL}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        try_files $uri /index.html;
+    }
+}

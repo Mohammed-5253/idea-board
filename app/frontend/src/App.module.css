@@ -1,0 +1,77 @@
+/*
+ * CSS Modules (D-02): class names are scoped to this module at build time, so styles can't
+ * leak between components. Plain CSS, no framework dependency.
+ * Colours meet WCAG AA contrast; dark mode follows the OS setting.
+ */
+.page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+.header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+.subtitle {
+  margin: 0.25rem 0 1.5rem;
+  color: var(--muted);
+}
+.form {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+.form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.formFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.listSection {
+  margin-top: 2rem;
+}
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.item {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+.content {
+  margin: 0 0 0.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.error {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--error-bg);
+}
+.errorText {
+  color: var(--error);
+  font-size: 0.9rem;
+  margin: 0;
+}
