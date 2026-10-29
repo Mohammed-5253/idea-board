@@ -11,7 +11,7 @@ patches:
 images:
 - name: backend
   newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/backend
-  newTag: 1.0.0-86b0558-2
+  newTag: 1.1.0-22b3c98-4
 - name: frontend
   newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/frontend
-  newTag: 1.0.0-86b0558-2
+  newTag: 1.1.0-22b3c98-4
