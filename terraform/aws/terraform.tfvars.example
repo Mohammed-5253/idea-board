@@ -1,8 +1,0 @@
-# Copy to terraform.tfvars (git-ignored) and fill in.
-region       = "ap-south-1"
-name         = "idea-board"
-git_repo_url = "https://github.com/<your-github-username>/idea-board.git"
-
-# Private repo? Do NOT put the token here:
-#   export TF_VAR_git_username=<you>
-#   export TF_VAR_git_token=<read-only token>

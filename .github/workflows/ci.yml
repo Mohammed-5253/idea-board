@@ -1,0 +1,193 @@
+# =============================================================================
+# CI pipeline – test → build → push to ECR → update kustomize-apps (Argo CD deploys)
+#
+# Pull request : tests only (nothing is pushed).
+# Push to main : tests → build both images → push to ECR → commit the new image tag to
+#                kustomize-apps/overlays/aws → Argo CD sees the commit and deploys (CD).
+#
+# IMAGE TAG    : <version.txt>-<short commit SHA>-<run number>, e.g. 1.0.0-a1b2c3d-42
+# AWS LOGIN    : GitHub OIDC → IAM role (terraform/modules/aws/github-oidc). NO AWS keys
+#                are stored in GitHub. Needs repository VARIABLE AWS_CI_ROLE_ARN.
+# SECURITY     : every action pinned to a commit SHA; each job gets only the permissions
+#                it needs.
+# =============================================================================
+name: ci
+
+on:
+  pull_request:
+    paths: ["app/**", "version.txt", ".github/workflows/ci.yml"]
+  push:
+    branches: [main]
+    # kustomize-apps/ is NOT listed → the pipeline's own tag-update commit never re-triggers it.
+    paths: ["app/**", "version.txt", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+permissions: {}
+
+# One run per branch at a time; on main, queue (never cancel half-way through a release).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: 326435482847.dkr.ecr.ap-south-1.amazonaws.com
+  ECR_PREFIX: idea-board
+  OVERLAY: kustomize-apps/overlays/aws
+
+jobs:
+  # ---------------------------------------------------------------------------
+  test-backend:
+    name: test · backend (ruff + unit tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app/backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: app/backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest tests/unit
+
+  # ---------------------------------------------------------------------------
+  test-frontend:
+    name: test · frontend (lint + tests + build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app/frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Compute the image tag ONCE so both images (and the manifest update) use the same one.
+  version:
+    name: version · compute image tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: tag
+        run: |
+          version="$(tr -d '[:space:]' < version.txt)"
+          tag="${version}-${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "### Image tag: \`$tag\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  build-push:
+    name: build · push (${{ matrix.image }})
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [test-backend, test-frontend, version]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC token → AWS role
+    strategy:
+      matrix:
+        image: [backend, frontend]
+    env:
+      REPO: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/${{ matrix.image }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # ECR tags are IMMUTABLE. A "Re-run" keeps the same run number → same tag → skip.
+      - id: exists
+        run: |
+          if aws ecr describe-images --repository-name "$ECR_PREFIX/${{ matrix.image }}" \
+               --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$REPO:$TAG already exists – push skipped"
+          fi
+
+      - if: steps.exists.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: steps.exists.outputs.skip != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app/${{ matrix.image }}
+          platforms: linux/amd64 # EKS nodes are x86_64 (t3.large)
+          push: true
+          tags: ${{ env.REPO }}:${{ env.TAG }}
+          labels: |
+            org.opencontainers.image.version=${{ env.TAG }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # ---------------------------------------------------------------------------
+  # GitOps hand-off: write the new tag into Git. Argo CD does the actual deployment.
+  update-manifests:
+    name: deploy · update kustomize-apps/overlays/aws
+    needs: [version, build-push]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # push the tag-update commit to main
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - name: Set image tags (kustomize edit)
+        working-directory: ${{ env.OVERLAY }}
+        run: |
+          kustomize edit set image "backend=$ECR_REGISTRY/$ECR_PREFIX/backend:$TAG"
+          kustomize edit set image "frontend=$ECR_REGISTRY/$ECR_PREFIX/frontend:$TAG"
+          git diff
+      - name: Commit and push
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$OVERLAY/kustomization.yaml"
+          git commit -m "deploy(aws): images $TAG" -m "Source commit: $GITHUB_SHA" -m "${COMMIT_MSG%%$'\n'*}"
+          # Another commit may have landed meanwhile → rebase and retry a few times.
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
+      - run: echo "Deployed tag \`$TAG\` → Argo CD will sync $OVERLAY" >> "$GITHUB_STEP_SUMMARY"
