@@ -26,7 +26,7 @@ import urllib.request
 
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+DEFAULT_MODEL = "openrouter/free"  # OpenRouter router: picks any currently available free model
 MAX_INPUT_CHARS = 60_000
 REQUEST_TIMEOUT_SECONDS = 120
 
