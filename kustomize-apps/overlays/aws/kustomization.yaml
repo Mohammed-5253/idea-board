@@ -2,16 +2,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../base
-  - storageclass.yaml
+- ../../base
+- storageclass.yaml
 patches:
-  - path: patch-config.yaml
-  - path: patch-ingress.yaml
+- path: patch-config.yaml
+- path: patch-ingress.yaml
 # ECR repositories created by terraform/modules/aws/ecr. The tag is set by CI (next step).
 images:
-  - name: backend
-    newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/backend
-    newTag: latest
-  - name: frontend
-    newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/frontend
-    newTag: latest
+- name: backend
+  newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/backend
+  newTag: 1.0.0-86b0558-2
+- name: frontend
+  newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/frontend
+  newTag: 1.0.0-86b0558-2
