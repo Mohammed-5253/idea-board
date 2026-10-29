@@ -84,7 +84,8 @@ def ask(mode: str, text: str) -> str:
     if not api_key:
         raise ValueError("AI_API_KEY is not set")
 
-    base_url = os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL).strip().rstrip("/")
+    base_url = os.environ.get("AI_BASE_URL") or DEFAULT_BASE_URL
+    base_url = base_url.strip().rstrip("/")
     if not base_url:
         raise ValueError("AI_BASE_URL is empty")
 
