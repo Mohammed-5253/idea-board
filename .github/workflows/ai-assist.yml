@@ -37,13 +37,27 @@ jobs:
           AI_MODEL: ${{ vars.AI_MODEL }}
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          DEPLOY_TARGETS: ${{ vars.DEPLOY_TARGETS }}
         run: |
-          git diff HEAD^1 HEAD | python3 ci/ai/assist.py pr > review.md
+          git diff HEAD^1 HEAD > pr.diff
+          python3 ci/ai/assist.py pr < pr.diff > review.md
+          # Infra compatibility: PR vs what exists in each deploy target's Terraform state
+          # (terraform/<cloud>/inventory.txt, refreshed by terraform/tf.sh).
+          { for t in ${DEPLOY_TARGETS//,/ }; do
+              echo "## Inventory: $t"; cat "terraform/$t/inventory.txt" 2>/dev/null; echo
+            done
+            echo "## Diff"; cat pr.diff; } | python3 ci/ai/assist.py infra > infra.md
+          { echo; cat infra.md; } >> review.md
           cat review.md >> "$GITHUB_STEP_SUMMARY"
           gh pr comment "$PR" --body-file review.md --edit-last --create-if-none
           risk="$(grep -oE 'RISK: [1-5]' review.md | head -1 | cut -d' ' -f2)"
           if [ "${risk:-0}" -ge 4 ]; then
             gh pr edit "$PR" --add-label needs-review || echo "::warning::create label 'needs-review' once in the repo"
+          fi
+          if grep -q 'COMPATIBLE: no' infra.md; then
+            gh pr edit "$PR" --add-label infra-mismatch || echo "::warning::create label 'infra-mismatch' once in the repo"
+          else
+            gh pr edit "$PR" --remove-label infra-mismatch 2>/dev/null || true
           fi
 
   # ---------------------------------------------------------------------------

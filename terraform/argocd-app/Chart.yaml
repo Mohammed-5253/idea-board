@@ -1,0 +1,6 @@
+# Our own tiny chart (replaces argoproj argocd-apps, whose repo times out): the one
+# Argo CD Application that syncs kustomize-apps/overlays/<cloud>. Values come from
+# terraform/modules/common/argocd.
+apiVersion: v2
+name: argocd-app
+version: 1.0.0

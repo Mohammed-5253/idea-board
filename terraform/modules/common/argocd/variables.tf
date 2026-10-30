@@ -21,3 +21,8 @@ variable "git_token" {
   default   = ""
   sensitive = true
 }
+
+variable "ci_rbac_subject" {
+  description = "Kubernetes identity of the CI role (read-only RBAC), e.g. { kind = \"Group\", name = \"idea-board-ci\" }."
+  type        = object({ kind = string, name = string })
+}

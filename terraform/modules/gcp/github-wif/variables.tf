@@ -20,3 +20,7 @@ variable "repository_name" {
   description = "Artifact Registry repository the CI may push to."
   type        = string
 }
+
+variable "project_id" {
+  type = string
+}

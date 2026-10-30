@@ -35,6 +35,13 @@ module "github_oidc" {
   ecr_repository_arns = module.ecr.repository_arns
 }
 
+# CI verify-deploy logs in to EKS as kube group idea-board-ci (read-only RBAC in modules/common/argocd).
+resource "aws_eks_access_entry" "ci" {
+  cluster_name      = module.eks.cluster_name
+  principal_arn     = module.github_oidc.role_arn
+  kubernetes_groups = ["idea-board-ci"]
+}
+
 module "alb_controller" {
   source            = "../modules/aws/alb-controller"
   count             = var.install_addons ? 1 : 0
@@ -49,13 +56,14 @@ module "alb_controller" {
 }
 
 module "argocd" {
-  source       = "../modules/common/argocd"
-  count        = var.install_addons ? 1 : 0
-  git_repo_url = var.git_repo_url
-  git_revision = var.git_revision
-  git_username = var.git_username
-  git_token    = var.git_token
-  app_path     = "kustomize-apps/overlays/aws"
+  source          = "../modules/common/argocd"
+  count           = var.install_addons ? 1 : 0
+  git_repo_url    = var.git_repo_url
+  git_revision    = var.git_revision
+  git_username    = var.git_username
+  git_token       = var.git_token
+  app_path        = "kustomize-apps/overlays/aws"
+  ci_rbac_subject = { kind = "Group", name = "idea-board-ci" }
 
   depends_on = [module.alb_controller]
 }

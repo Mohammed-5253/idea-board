@@ -57,6 +57,7 @@ module "artifact_registry" {
 
 module "github_wif" {
   source               = "../modules/gcp/github-wif"
+  project_id           = var.project_id
   name                 = var.name
   region               = var.region
   github_owner_id      = var.github_owner_id
@@ -74,12 +75,13 @@ resource "google_compute_global_address" "app" {
 }
 
 module "argocd" {
-  source       = "../modules/common/argocd"
-  count        = var.install_addons ? 1 : 0
-  git_repo_url = var.git_repo_url
-  git_revision = var.git_revision
-  git_username = var.git_username
-  git_token    = var.git_token
-  app_path     = "kustomize-apps/overlays/gcp"
-  depends_on   = [module.gke]
+  source          = "../modules/common/argocd"
+  count           = var.install_addons ? 1 : 0
+  git_repo_url    = var.git_repo_url
+  git_revision    = var.git_revision
+  git_username    = var.git_username
+  git_token       = var.git_token
+  app_path        = "kustomize-apps/overlays/gcp"
+  ci_rbac_subject = { kind = "User", name = module.github_wif.service_account_email }
+  depends_on      = [module.gke]
 }
