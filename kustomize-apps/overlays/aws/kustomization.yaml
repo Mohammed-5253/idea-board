@@ -1,13 +1,15 @@
 # Overlay: AWS (EKS). Synced by Argo CD (terraform/modules/common/argocd, app_path).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 resources:
 - ../../base
 - storageclass.yaml
+
 patches:
 - path: patch-config.yaml
 - path: patch-ingress.yaml
-# ECR repositories created by terraform/modules/aws/ecr. The tag is set by CI (next step).
+
 images:
 - name: backend
   newName: 326435482847.dkr.ecr.ap-south-1.amazonaws.com/idea-board/backend

@@ -99,9 +99,9 @@ jobs:
             echo "::notice::$tag already released – skipped"; exit 0
           fi
           prev="$(git describe --tags --abbrev=0 2>/dev/null || true)" # empty on the first release
-          # Skip the pipeline's own deploy(aws) tag-update commits; cap the list for the first release.
+          # Skip the pipeline's own deploy(<cloud>) tag-update commits; cap the list for the first release.
           { echo "Version: $tag"; echo "Previous: ${prev:-none}";
-            git log --no-merges --format='- %s' "${prev:+$prev..}HEAD" | grep -v '^- deploy(aws)' | head -100; } \
+            git log --no-merges --format='- %s' "${prev:+$prev..}HEAD" | grep -v '^- deploy(' | head -100; } \
             | python3 ci/ai/assist.py release > notes.md
           gh release create "$tag" --title "$tag" --notes-file notes.md --target "$GITHUB_SHA"
           { echo "## Release $tag"; cat notes.md; } >> "$GITHUB_STEP_SUMMARY"

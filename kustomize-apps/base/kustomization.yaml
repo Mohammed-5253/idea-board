@@ -1,9 +1,3 @@
-# =============================================================================
-# kustomize-apps/base – the app, identical on every cloud.
-# Overlays (overlays/aws, overlays/gcp) = this base + small cloud-specific patches.
-# Render locally:  kubectl kustomize kustomize-apps/overlays/aws
-# Images are plain names `backend` / `frontend`; overlays set the registry + tag.
-# =============================================================================
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
