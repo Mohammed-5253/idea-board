@@ -3,11 +3,16 @@
 # CONFIG: env vars from ConfigMap `backend-config` (configmap.yaml). DB credentials come from
 #   the Dapr sidecar → secret store component (overlays/<cloud>/dapr-secretstore.yaml):
 #   AWS Secrets Manager / GCP Secret Manager, written by terraform (aws/rds, gcp/cloudsql).
-# DAPR: daprd runs as a NATIVE sidecar (terraform/modules/common/dapr), i.e. it starts
-#   before the init containers, so they can read secrets too.
-# INIT CONTAINERS: db-bootstrap + migrate prepare the database before the API starts.
+# DAPR: daprd runs as a NATIVE sidecar (terraform/modules/common/dapr): the injector appends
+#   it AFTER any init containers, so our init containers could never reach it. Hence the
+#   DB steps run in the backend container itself (all init containers incl. daprd have
+#   started by then). No init containers here.
+# STARTUP (command below, every pod start, both steps idempotent, then exec → uvicorn is PID 1):
+#   1. idea-board-db-bootstrap  create DB/app user (OWNER secret + app secret)
+#   2. alembic upgrade head     migrations as OWNER (DAPR_DB_SECRET_NAME=idea-board-db-owner)
+#   3. uvicorn                  the API (app secret idea-board-db-app, default)
 # PROBES: liveness /healthz (process only) · readiness /readyz (DB) · startup gives up to
-#   60 s for the DB pool creation.
+#   180 s for Dapr + bootstrap + migrations + DB pool creation.
 # SECURITY: matches PSA "restricted" + read-only root FS (/tmp is the only writable dir).
 # =============================================================================
 apiVersion: apps/v1
@@ -57,54 +62,19 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: backend
-      # Run BEFORE the API starts, every time a pod starts (both steps are idempotent):
-      #   1. db-bootstrap: create the least-privileged app user (as the OWNER)
-      #      secrets idea-board-db-owner + idea-board-db-app (app defaults)
-      #   2. migrate:      create/upgrade tables with Alembic (as the OWNER)
-      #      secret idea-board-db-owner (DAPR_DB_SECRET_NAME below)
-      # Same image as the API, so schema and code always match.
-      initContainers:
-        - name: db-bootstrap
-          image: backend
-          command: ["idea-board-db-bootstrap"]
-          envFrom:
-            - configMapRef:
-                name: backend-config
-          resources:
-            requests: {cpu: 50m, memory: 128Mi}
-            limits: {cpu: 500m, memory: 256Mi}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-        - name: migrate
-          image: backend
-          command: ["alembic", "upgrade", "head"]
-          envFrom:
-            - configMapRef:
-                name: backend-config
-          env:
-            - name: DAPR_DB_SECRET_NAME
-              value: idea-board-db-owner
-          resources:
-            requests: {cpu: 50m, memory: 128Mi}
-            limits: {cpu: 500m, memory: 256Mi}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
       containers:
         - name: backend
           image: backend
           imagePullPolicy: IfNotPresent
+          # Same uvicorn flags as the Dockerfile CMD (keep both in sync).
+          command:
+            - sh
+            - -c
+            - >-
+              idea-board-db-bootstrap &&
+              DAPR_DB_SECRET_NAME=idea-board-db-owner alembic upgrade head &&
+              exec uvicorn idea_board.main:app --host 0.0.0.0 --port 8000
+              --proxy-headers --forwarded-allow-ips '*' --timeout-graceful-shutdown 20
           ports:
             - name: http
               containerPort: 8000
@@ -123,7 +93,7 @@ spec:
               path: /healthz
               port: http
             periodSeconds: 2
-            failureThreshold: 30
+            failureThreshold: 90
           livenessProbe:
             httpGet:
               path: /healthz

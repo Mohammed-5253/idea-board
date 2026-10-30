@@ -52,6 +52,8 @@ module.eks.module.eks.aws_iam_role_policy_attachment.this["AmazonEKSClusterPolic
 module.eks.module.eks.aws_security_group.cluster[0]
 module.eks.module.eks.aws_security_group.node[0]
 module.eks.module.eks.aws_security_group_rule.cluster["ingress_nodes_443"]
+module.eks.module.eks.aws_security_group_rule.node["dapr_conversion"]
+module.eks.module.eks.aws_security_group_rule.node["dapr_webhooks"]
 module.eks.module.eks.aws_security_group_rule.node["egress_all"]
 module.eks.module.eks.aws_security_group_rule.node["ingress_cluster_10251_webhook"]
 module.eks.module.eks.aws_security_group_rule.node["ingress_cluster_443"]
