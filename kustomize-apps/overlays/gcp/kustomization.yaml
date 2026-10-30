@@ -18,7 +18,7 @@ patches:
 images:
 - name: backend
   newName: asia-south1-docker.pkg.dev/project-7e93dfd0-5ad8-4ac0-aec/idea-board/backend
-  newTag: 2.0.0-10f9d3e-17
+  newTag: 2.0.0-d028698-22
 - name: frontend
   newName: asia-south1-docker.pkg.dev/project-7e93dfd0-5ad8-4ac0-aec/idea-board/frontend
-  newTag: 2.0.0-10f9d3e-17
+  newTag: 2.0.0-d028698-22
