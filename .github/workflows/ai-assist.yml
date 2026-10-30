@@ -37,13 +37,13 @@ jobs:
           AI_MODEL: ${{ vars.AI_MODEL }}
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          DEPLOY_TARGETS: ${{ vars.DEPLOY_TARGETS }}
         run: |
           git diff HEAD^1 HEAD > pr.diff
           python3 ci/ai/assist.py pr < pr.diff > review.md
-          # Infra compatibility: PR vs what exists in each deploy target's Terraform state
-          # (terraform/<cloud>/inventory.txt, refreshed by terraform/tf.sh).
-          { for t in ${DEPLOY_TARGETS//,/ }; do
+          # Infra compatibility: PR vs what exists in EVERY cloud's Terraform state
+          # (terraform/<cloud>/inventory.txt, refreshed by terraform/tf.sh) – the operator may
+          # release to any of them. Advisory here; ci.yml's infra-check enforces it per release.
+          { for t in aws gcp; do
               echo "## Inventory: $t"; cat "terraform/$t/inventory.txt" 2>/dev/null; echo
             done
             echo "## Diff"; cat pr.diff; } | python3 ci/ai/assist.py infra > infra.md
