@@ -1,0 +1,9 @@
+# Load balancer front-end settings: redirect http:// → https:// (like CloudFront's redirect-to-https).
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: idea-board
+  namespace: idea-board
+spec:
+  redirectToHttps:
+    enabled: true
