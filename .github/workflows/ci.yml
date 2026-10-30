@@ -328,6 +328,9 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
           token_format: access_token
+          # userinfo.email: GKE then sees the SA email (bound by the RBAC in
+          # modules/common/argocd), not its numeric ID → otherwise Forbidden.
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/userinfo.email
       # kubeconfig with the WIF access token (no gke-gcloud-auth-plugin needed).
       - if: matrix.cloud == 'gcp'
         env:
