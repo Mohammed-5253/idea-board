@@ -39,3 +39,7 @@ output "app_url" {
   description = "Public HTTPS URL (works once the managed certificate is ACTIVE, ~15-60 min after the Ingress)."
   value       = "https://${replace(google_compute_global_address.app.address, ".", "-")}.sslip.io"
 }
+
+output "db_private_ip" {
+  value = module.cloudsql.private_ip
+}

@@ -29,3 +29,12 @@ output "app_url" {
   description = "Public HTTPS URL of the app (CloudFront)."
   value       = var.enable_cloudfront ? module.cloudfront[0].url : null
 }
+
+output "db_endpoint" {
+  value = module.rds.endpoint
+}
+
+output "backend_role_arn" {
+  description = "IRSA role annotated on the backend ServiceAccount (kustomize-apps/overlays/aws/patch-serviceaccount.yaml)."
+  value       = module.rds.backend_role_arn
+}

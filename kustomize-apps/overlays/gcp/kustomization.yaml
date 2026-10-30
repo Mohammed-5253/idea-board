@@ -1,4 +1,7 @@
 # Overlay: GCP (GKE). Synced by Argo CD (terraform/modules/common/argocd, app_path).
+# Database: Cloud SQL PostgreSQL (terraform/modules/gcp/cloudsql); credentials via Dapr (base/backend-deployment.yaml).
+# Dapr secretstore → GCP Secret Manager; access via Workload Identity (IAM binding on the
+# KSA principal idea-board/backend, no annotation needed).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -6,6 +9,7 @@ resources:
 - ../../base
 - managed-certificate.yaml
 - frontend-config.yaml
+- dapr-secretstore.yaml
 
 patches:
 - path: patch-config.yaml

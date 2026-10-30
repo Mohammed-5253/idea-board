@@ -9,4 +9,4 @@ metadata:
   namespace: idea-board
 spec:
   domains:
-    - 34-95-97-108.sslip.io # e.g. 34-120-1-2.sslip.io
+    - 34-144-203-136.sslip.io # e.g. 34-120-1-2.sslip.io

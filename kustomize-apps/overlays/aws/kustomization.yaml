@@ -1,14 +1,17 @@
 # Overlay: AWS (EKS). Synced by Argo CD (terraform/modules/common/argocd, app_path).
+# Database: RDS PostgreSQL (terraform/modules/aws/rds); credentials via Dapr (base/backend-deployment.yaml).
+# Dapr secretstore → AWS Secrets Manager, using the IRSA role on the backend ServiceAccount.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
 - ../../base
-- storageclass.yaml
+- dapr-secretstore.yaml
 
 patches:
 - path: patch-config.yaml
 - path: patch-ingress.yaml
+- path: patch-serviceaccount.yaml
 
 images:
 - name: backend

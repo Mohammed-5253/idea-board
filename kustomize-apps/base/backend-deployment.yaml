@@ -1,6 +1,10 @@
 # =============================================================================
 # Backend Deployment (FastAPI)
-# CONFIG: env vars from ConfigMap `backend-config` + Secret `backend-db` (configmap.yaml, secret.yaml).
+# CONFIG: env vars from ConfigMap `backend-config` (configmap.yaml). DB credentials come from
+#   the Dapr sidecar → secret store component (overlays/<cloud>/dapr-secretstore.yaml):
+#   AWS Secrets Manager / GCP Secret Manager, written by terraform (aws/rds, gcp/cloudsql).
+# DAPR: daprd runs as a NATIVE sidecar (terraform/modules/common/dapr), i.e. it starts
+#   before the init containers, so they can read secrets too.
 # INIT CONTAINERS: db-bootstrap + migrate prepare the database before the API starts.
 # PROBES: liveness /healthz (process only) · readiness /readyz (DB) · startup gives up to
 #   60 s for the DB pool creation.
@@ -28,6 +32,10 @@ spec:
       labels:
         app.kubernetes.io/name: backend
       annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: backend
+        # Prometheus scrapes the app's /metrics; Dapr's own metrics are not needed.
+        dapr.io/enable-metrics: "false"
         # Prometheus (kubernetes-pods job) scrapes the app's /metrics – the health gate's data.
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
@@ -51,7 +59,9 @@ spec:
               app.kubernetes.io/name: backend
       # Run BEFORE the API starts, every time a pod starts (both steps are idempotent):
       #   1. db-bootstrap: create the least-privileged app user (as the OWNER)
+      #      secrets idea-board-db-owner + idea-board-db-app (app defaults)
       #   2. migrate:      create/upgrade tables with Alembic (as the OWNER)
+      #      secret idea-board-db-owner (DAPR_DB_SECRET_NAME below)
       # Same image as the API, so schema and code always match.
       initContainers:
         - name: db-bootstrap
@@ -60,15 +70,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: backend-config
-            - secretRef:
-                name: backend-db
-          env:
-            - name: BOOTSTRAP_OWNER_USER
-              valueFrom:
-                secretKeyRef: {name: postgres, key: POSTGRES_USER}
-            - name: BOOTSTRAP_OWNER_PASSWORD
-              valueFrom:
-                secretKeyRef: {name: postgres, key: POSTGRES_PASSWORD}
           resources:
             requests: {cpu: 50m, memory: 128Mi}
             limits: {cpu: 500m, memory: 256Mi}
@@ -87,12 +88,8 @@ spec:
             - configMapRef:
                 name: backend-config
           env:
-            - name: DB_USER
-              valueFrom:
-                secretKeyRef: {name: postgres, key: POSTGRES_USER}
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef: {name: postgres, key: POSTGRES_PASSWORD}
+            - name: DAPR_DB_SECRET_NAME
+              value: idea-board-db-owner
           resources:
             requests: {cpu: 50m, memory: 128Mi}
             limits: {cpu: 500m, memory: 256Mi}
@@ -114,8 +111,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: backend-config
-            - secretRef:
-                name: backend-db
           resources:
             requests:
               cpu: 100m
