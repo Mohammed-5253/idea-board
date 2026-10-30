@@ -59,8 +59,8 @@ and `terraform/argocd-app`, so an apply never downloads charts.
 | Trigger | What happens |
 |---|---|
 | Pull request | Tests (ruff, pytest, eslint, vitest, build). AI comments a summary, risk score, test ideas and an infra-compatibility verdict. |
-| Push to main | Tests, build once, push to every cloud in `DEPLOY_TARGETS`, one `deploy(<cloud>)` commit, then verify the Argo CD rollout. |
-| Run workflow (manual) | Same as a push, but the operator picks `aws`, `gcp` or `aws,gcp` for this release. |
+| Push to main | Tests only. Nothing is built or deployed. |
+| Run workflow (manual) | The only way to release. The operator picks `aws`, `gcp` or `aws,gcp`. Tests, AI infra check for the picked clouds (stops the release on `COMPATIBLE: no`), build once, push to the picked clouds' registries only, one `deploy(<clouds>)` commit to their overlays, then verify the Argo CD rollout. |
 | CI run fails | AI explains the failed log (job summary, and a PR comment when there is a PR). |
 | Rollout fails | AI explains the Argo CD status, pods, events and logs in a GitHub issue assigned to the repo owner. |
 | `version.txt` changes on main | GitHub Release `v<version>` with AI-written notes. |
@@ -69,16 +69,18 @@ Image tags look like `1.1.2-19b5615-12` (`version-commit-run`). Registries are i
 so re-running a job skips images that already exist.
 
 PR labels: `needs-review` (AI risk 4–5) and `infra-mismatch` (the PR needs infrastructure
-that is not in `terraform/<cloud>/inventory.txt`). Both are advisory and never block a merge.
+that is not in `terraform/aws/inventory.txt` or `terraform/gcp/inventory.txt`). Both are
+advisory and never block a merge. At release time the same check runs only for the picked
+clouds, against the changes since each cloud's last deploy, and does block.
+Keep each `inventory.txt` current: run terraform through `terraform/tf.sh` and commit it.
 
 ## Configuration
 
-Repository variables (Settings → Secrets and variables → Actions). Switching clouds means
-changing `DEPLOY_TARGETS`. No code changes.
+Repository variables (Settings → Secrets and variables → Actions). The target cloud is
+picked per release in the Run workflow form, not in a variable.
 
 | Variable | Example |
 |---|---|
-| `DEPLOY_TARGETS` | `gcp`, `aws` or `aws,gcp` (empty: build and deploy are skipped) |
 | `AWS_REGISTRY` | `<account>.dkr.ecr.ap-south-1.amazonaws.com/idea-board` |
 | `AWS_REGION` | `ap-south-1` |
 | `AWS_CI_ROLE_ARN` | Terraform output `github_ci_role_arn` |
@@ -96,8 +98,7 @@ never fails the pipeline.
 ## Switching clouds
 
 1. `terraform/tf.sh <cloud> apply` (both passes) and commit the inventory.
-2. Set `DEPLOY_TARGETS` to the new cloud.
-3. Run the `ci` workflow. The first run fills the empty registry.
+2. Run the `ci` workflow and pick the new cloud. The first run fills the empty registry.
 
 ## Tearing down
 
