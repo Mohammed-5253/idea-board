@@ -3,7 +3,8 @@
 # 1. OIDC provider: AWS trusts tokens issued by GitHub (token.actions.githubusercontent.com).
 # 2. IAM role: assumable ONLY by workflows of `github_repo` running on `main` (`sub` claim).
 #    Each run gets temporary credentials (~1 h); nothing to leak or rotate.
-# 3. Policy: push/pull images to the given ECR repositories only (least privilege).
+# 3. Policy: push/pull images to the given ECR repositories only (least privilege),
+#    plus DescribeCluster on our EKS cluster (kubeconfig for CI verify-deploy).
 # =============================================================================
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
@@ -54,6 +55,12 @@ resource "aws_iam_role_policy" "ecr_push" {
           "ecr:DescribeImages",
         ]
         Resource = var.ecr_repository_arns
+      },
+      {
+        Sid      = "EksKubeconfig" # verify-deploy: aws eks update-kubeconfig
+        Effect   = "Allow"
+        Action   = "eks:DescribeCluster"
+        Resource = "arn:aws:eks:*:*:cluster/${var.name}"
       },
     ]
   })

@@ -5,7 +5,9 @@
 #    attribute_condition: ONLY workflows of our repo (immutable owner/repo IDs, so a
 #    renamed or re-created repo with the same name can't get in) running on `main`.
 # 2. Service account the workflow impersonates; it gets short-lived tokens (~1 h).
-# 3. Permission: push/pull to OUR Artifact Registry repository only (least privilege).
+# 3. Permission: push/pull to OUR Artifact Registry repository only (least privilege),
+#    plus GKE clusterViewer (endpoint only; Kubernetes reads come from the RBAC in
+#    modules/common/argocd) for CI verify-deploy.
 # Note: a deleted pool is kept 30 days and its ID can't be reused meanwhile
 #   (re-apply after destroy → undelete it: gcloud iam workload-identity-pools undelete).
 # =============================================================================
@@ -54,4 +56,10 @@ resource "google_artifact_registry_repository_iam_member" "push" {
   repository = var.repository_name
   role       = "roles/artifactregistry.writer"
   member     = "serviceAccount:${google_service_account.ci.email}"
+}
+
+resource "google_project_iam_member" "gke_cluster_viewer" {
+  project = var.project_id
+  role    = "roles/container.clusterViewer"
+  member  = "serviceAccount:${google_service_account.ci.email}"
 }

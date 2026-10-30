@@ -3,7 +3,9 @@
 #
 # Pull request : tests only (nothing is pushed).
 # Push to main : tests → build both images ONCE → push to every cloud in DEPLOY_TARGETS →
-#                ONE commit with the new tag in kustomize-apps/overlays/<cloud> → Argo CD deploys.
+#                ONE commit with the new tag in kustomize-apps/overlays/<cloud> → Argo CD deploys →
+#                verify-deploy waits for Argo CD; on failure the AI explains it in a GitHub issue
+#                assigned to the repo owner (GitHub emails it).
 #
 # IMAGE TAG    : <version.txt>-<short commit SHA>-<run number>, e.g. 1.0.0-a1b2c3d-42
 # CLOUD SWITCH : repository VARIABLES, no code change:
@@ -13,6 +15,8 @@
 #                  AWS_CI_ROLE_ARN  terraform/modules/aws/github-oidc output
 #                  GCP_REGISTRY     <region>-docker.pkg.dev/<project>/idea-board
 #                  GCP_WIF_PROVIDER, GCP_CI_SERVICE_ACCOUNT  terraform/modules/gcp/github-wif outputs
+#                  EKS_CLUSTER, GKE_CLUSTER, GKE_LOCATION  verify-deploy reads Argo CD there
+#                Manual "Run workflow" can override DEPLOY_TARGETS for one release.
 #                Login is OIDC/WIF only. NO cloud keys are stored in GitHub.
 # SECURITY     : every action pinned to a commit SHA; each job gets only the permissions
 #                it needs.
@@ -26,7 +30,13 @@ on:
     branches: [main]
     # kustomize-apps/ is NOT listed → the pipeline's own tag-update commit never re-triggers it.
     paths: ["app/**", "version.txt", ".github/workflows/ci.yml"]
-  workflow_dispatch:
+  workflow_dispatch: # "Run workflow" button: the operator picks the cloud for this release
+    inputs:
+      targets:
+        description: Push images to and deploy on
+        type: choice
+        options: [repo-default, gcp, aws, "aws,gcp"]
+        default: repo-default
 
 permissions: {}
 
@@ -93,21 +103,32 @@ jobs:
       contents: read
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      targets: ${{ steps.tag.outputs.targets }} # e.g. "aws,gcp"; empty → no build/deploy
+      targets_json: ${{ steps.tag.outputs.targets_json }} # e.g. ["aws","gcp"] for a matrix
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: tag
+        env:
+          INPUT_TARGETS: ${{ inputs.targets }} # empty on push
+          DEFAULT_TARGETS: ${{ vars.DEPLOY_TARGETS }}
         run: |
           version="$(tr -d '[:space:]' < version.txt)"
           tag="${version}-${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "### Image tag: \`$tag\`" >> "$GITHUB_STEP_SUMMARY"
+          targets="${INPUT_TARGETS:-repo-default}"
+          [ "$targets" = repo-default ] && targets="$DEFAULT_TARGETS"
+          for t in ${targets//,/ }; do
+            case "$t" in aws|gcp) ;; *) echo "::error::unknown cloud '$t' (use aws, gcp or aws,gcp)"; exit 1 ;; esac
+          done
+          json="$(jq -Rc 'split(",")' <<<"$targets")"
+          { echo "tag=$tag"; echo "targets=$targets"; echo "targets_json=$json"; } >> "$GITHUB_OUTPUT"
+          echo "### Image tag: \`$tag\` → ${targets:-no deploy (DEPLOY_TARGETS empty)}" >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   build-push:
     name: build · push (${{ matrix.image }})
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.DEPLOY_TARGETS != ''
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.version.outputs.targets != ''
     needs: [test-backend, test-frontend, version]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -118,7 +139,7 @@ jobs:
       matrix:
         image: [backend, frontend]
     env:
-      DEPLOY_TARGETS: ${{ vars.DEPLOY_TARGETS }}
+      DEPLOY_TARGETS: ${{ needs.version.outputs.targets }}
       AWS_REGISTRY: ${{ vars.AWS_REGISTRY }}
       GCP_REGISTRY: ${{ vars.GCP_REGISTRY }}
       TAG: ${{ needs.version.outputs.tag }}
@@ -127,22 +148,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - if: contains(vars.DEPLOY_TARGETS, 'aws')
+      - if: contains(needs.version.outputs.targets, 'aws')
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - if: contains(vars.DEPLOY_TARGETS, 'aws')
+      - if: contains(needs.version.outputs.targets, 'aws')
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
-      - if: contains(vars.DEPLOY_TARGETS, 'gcp')
+      - if: contains(needs.version.outputs.targets, 'gcp')
         id: gcp
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
           token_format: access_token
-      - if: contains(vars.DEPLOY_TARGETS, 'gcp')
+      - if: contains(needs.version.outputs.targets, 'gcp')
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ vars.GCP_REGISTRY }} # docker uses only the host part
@@ -158,7 +179,6 @@ jobs:
             case "$t" in
               aws) reg="$AWS_REGISTRY" ;;
               gcp) reg="$GCP_REGISTRY" ;;
-              *) echo "::error::DEPLOY_TARGETS: unknown cloud '$t' (use aws, gcp or aws,gcp)"; exit 1 ;;
             esac
             [ -n "$reg" ] || { echo "::error::repository variable for '$t' registry is empty"; exit 1; }
             ref="$reg/${{ matrix.image }}:$TAG"
@@ -190,14 +210,14 @@ jobs:
   # ---------------------------------------------------------------------------
   # GitOps hand-off: write the new tag into Git. Argo CD in each cluster does the deployment.
   update-manifests:
-    name: deploy · update kustomize-apps/overlays (${{ vars.DEPLOY_TARGETS }})
+    name: deploy · update kustomize-apps/overlays (${{ needs.version.outputs.targets }})
     needs: [version, build-push]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write # push the tag-update commit to main
     env:
-      DEPLOY_TARGETS: ${{ vars.DEPLOY_TARGETS }}
+      DEPLOY_TARGETS: ${{ needs.version.outputs.targets }}
       AWS_REGISTRY: ${{ vars.AWS_REGISTRY }}
       GCP_REGISTRY: ${{ vars.GCP_REGISTRY }}
       TAG: ${{ needs.version.outputs.tag }}
@@ -222,9 +242,106 @@ jobs:
           git add kustomize-apps/overlays
           git commit -m "deploy($DEPLOY_TARGETS): images $TAG" -m "Source commit: $GITHUB_SHA" -m "${COMMIT_MSG%%$'\n'*}"
           # Another commit may have landed meanwhile → rebase and retry a few times.
-          for i in 1 2 3; do
+          for _ in 1 2 3; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
             sleep 5
           done
           exit 1
       - run: echo "Deployed tag \`$TAG\` → Argo CD will sync overlays for $DEPLOY_TARGETS" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Wait until Argo CD runs the new tag (Synced + Healthy). On failure: collect Argo CD
+  # status, pods, events and logs → AI explanation → GitHub issue assigned to the repo
+  # owner (GitHub emails it). Read-only cluster access: terraform/modules/common/argocd RBAC.
+  verify-deploy:
+    name: verify · argo cd sync (${{ matrix.cloud }})
+    needs: [version, update-manifests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC token → AWS role / GCP Workload Identity Federation
+      issues: write # open the failure issue
+    strategy:
+      fail-fast: false
+      matrix:
+        cloud: ${{ fromJSON(needs.version.outputs.targets_json) }}
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: matrix.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - if: matrix.cloud == 'aws'
+        run: aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}"
+
+      - if: matrix.cloud == 'gcp'
+        id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+      # kubeconfig with the WIF access token (no gke-gcloud-auth-plugin needed).
+      - if: matrix.cloud == 'gcp'
+        env:
+          TOKEN: ${{ steps.gcp.outputs.access_token }}
+        run: |
+          read -r endpoint ca < <(gcloud container clusters describe "${{ vars.GKE_CLUSTER }}" \
+            --location "${{ vars.GKE_LOCATION }}" \
+            --format 'value(endpoint,masterAuth.clusterCaCertificate)')
+          echo "$ca" | base64 -d > "$RUNNER_TEMP/gke-ca.crt"
+          kubectl config set-cluster gke --server "https://$endpoint" --certificate-authority "$RUNNER_TEMP/gke-ca.crt"
+          kubectl config set-credentials ci --token "$TOKEN"
+          kubectl config set-context gke --cluster gke --user ci
+          kubectl config use-context gke
+
+      - id: wait
+        run: |
+          # Argo CD polls Git every ~3 min, then the rollout runs → allow 15 min.
+          for _ in $(seq 90); do
+            app="$(kubectl -n argocd get application idea-board -o json)"
+            images="$(jq -r '.status.summary.images[]?' <<<"$app")"
+            sync="$(jq -r '.status.sync.status' <<<"$app")"
+            health="$(jq -r '.status.health.status' <<<"$app")"
+            phase="$(jq -r '.status.operationState.phase // ""' <<<"$app")"
+            echo "sync=$sync health=$health phase=$phase"
+            if grep -q ":$TAG\$" <<<"$images"; then
+              [ "$sync" = Synced ] && [ "$health" = Healthy ] && exit 0
+              case "$phase/$health" in Failed/*|Error/*|*/Degraded) break ;; esac
+            fi
+            sleep 10
+          done
+          echo "::error::Argo CD did not reach Synced+Healthy with $TAG (sync=$sync health=$health phase=$phase)"
+          exit 1
+
+      - if: failure() && steps.wait.conclusion == 'failure'
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ vars.AI_BASE_URL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+          GH_TOKEN: ${{ github.token }}
+          CLOUD: ${{ matrix.cloud }}
+          OWNER: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          { echo "## Argo CD Application status"
+            kubectl -n argocd get application idea-board -o json | jq '.status | {sync, health, operationState, conditions, resources: [.resources[]? | select(.health.status != "Healthy" or .status != "Synced")]}'
+            echo "## Pods"; kubectl -n idea-board get pods -o wide
+            echo "## Events"; kubectl -n idea-board get events --sort-by .lastTimestamp | tail -40
+            echo "## Logs of not-ready pods"
+            for p in $(kubectl -n idea-board get pods -o json | jq -r '.items[] | select([.status.containerStatuses[]?.ready] | all | not) | .metadata.name'); do
+              echo "### $p"; kubectl -n idea-board logs "$p" --all-containers --tail 40 2>&1 || true
+            done; } > evidence.txt 2>&1 || true
+          python3 ci/ai/assist.py deploy < evidence.txt > explain.md
+          { echo "Argo CD did not deploy \`$TAG\` on **$CLOUD**. CI run: $RUN_URL"; echo
+            cat explain.md; echo
+            echo "<details><summary>Raw evidence</summary>"; echo; echo '```'; head -c 50000 evidence.txt; echo '```'; echo "</details>"; } > issue.md
+          gh issue create --title "Deploy failed on $CLOUD: $TAG" --body-file issue.md --assignee "$OWNER"
+          cat issue.md >> "$GITHUB_STEP_SUMMARY"
