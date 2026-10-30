@@ -1,16 +1,108 @@
 # Idea Board
 
-A small full-stack app (React + FastAPI + PostgreSQL) deployed to Kubernetes on AWS (EKS) and GCP (GKE).
+A small full-stack app (React + FastAPI + PostgreSQL) that runs on Kubernetes on AWS (EKS)
+or GCP (GKE). Infrastructure is Terraform, deployments are GitOps with Argo CD, and CI is
+GitHub Actions with an AI assistant for reviews and failure analysis.
+
+## How it fits together
 
 ```
-idea-board/
-├── app/              backend (FastAPI) + frontend (React/nginx), each with its Dockerfile
-├── terraform/        infrastructure: aws/ and gcp/ roots + reusable modules/
-├── kustomize-apps/   Kubernetes manifests: base/ + overlays/aws, overlays/gcp
-├── docker-compose.yml  run everything locally: `docker compose up`
-├── dapr/             local Dapr component for docker-compose
-└── version.txt       app version (SemVer) → CI image tag, e.g. backend:1.0.0
+push to main ─► GitHub Actions: test → build image → push to ECR / Artifact Registry
+                                    └─► commit new tag to kustomize-apps/overlays/<cloud>
+                                                   │
+                         Argo CD (in the cluster) ◄┘ syncs the overlay → app rolls out
+                                                   │
+                         CI verify-deploy waits for Synced + Healthy, opens an issue if not
 ```
 
-- Local: `docker compose up` → http://localhost:8080
-- Cloud: see `terraform/README.md`, then Argo CD syncs `kustomize-apps/overlays/<cloud>`.
+## Repository layout
+
+```
+app/backend/        FastAPI API (GET/POST /api/ideas, /api/version), Alembic migrations
+app/frontend/       React (Vite) served by nginx, proxies /api to the backend
+kustomize-apps/     Kubernetes manifests: base/ + overlays/aws, overlays/gcp
+terraform/          aws/ and gcp/ roots, shared modules/, vendored Helm charts
+ci/ai/assist.py     AI helper used by the workflows (no third-party packages)
+.github/workflows/  ci.yml (build + deploy), ai-assist.yml (AI review + release notes)
+docker-compose.yml  full stack locally, including a Dapr sidecar
+version.txt         app version; part of every image tag
+```
+
+## Run locally
+
+```sh
+docker compose up --build                       # http://localhost:8080
+docker compose --profile tools run --rm seed    # optional sample data
+docker compose down -v                          # stop and wipe the database
+```
+
+## Deploy to a cloud
+
+Infrastructure is created in two passes from `terraform/aws` or `terraform/gcp`
+(see [terraform/README.md](terraform/README.md) for the modules):
+
+1. `install_addons = false`: network, cluster, registry and the CI identity (OIDC / WIF).
+2. `install_addons = true`: Argo CD, which then deploys the app from Git.
+
+Use the wrapper instead of plain `terraform`, so the PR infra check stays current:
+
+```sh
+terraform/tf.sh gcp plan
+terraform/tf.sh gcp apply     # also writes terraform/gcp/inventory.txt – commit it
+```
+
+Terraform state is local and git-ignored. The Argo CD charts live in `terraform/argo-cd`
+and `terraform/argocd-app`, so an apply never downloads charts.
+
+## CI/CD
+
+| Trigger | What happens |
+|---|---|
+| Pull request | Tests (ruff, pytest, eslint, vitest, build). AI comments a summary, risk score, test ideas and an infra-compatibility verdict. |
+| Push to main | Tests, build once, push to every cloud in `DEPLOY_TARGETS`, one `deploy(<cloud>)` commit, then verify the Argo CD rollout. |
+| Run workflow (manual) | Same as a push, but the operator picks `aws`, `gcp` or `aws,gcp` for this release. |
+| CI run fails | AI explains the failed log (job summary, and a PR comment when there is a PR). |
+| Rollout fails | AI explains the Argo CD status, pods, events and logs in a GitHub issue assigned to the repo owner. |
+| `version.txt` changes on main | GitHub Release `v<version>` with AI-written notes. |
+
+Image tags look like `1.1.2-19b5615-12` (`version-commit-run`). Registries are immutable,
+so re-running a job skips images that already exist.
+
+PR labels: `needs-review` (AI risk 4–5) and `infra-mismatch` (the PR needs infrastructure
+that is not in `terraform/<cloud>/inventory.txt`). Both are advisory and never block a merge.
+
+## Configuration
+
+Repository variables (Settings → Secrets and variables → Actions). Switching clouds means
+changing `DEPLOY_TARGETS`. No code changes.
+
+| Variable | Example |
+|---|---|
+| `DEPLOY_TARGETS` | `gcp`, `aws` or `aws,gcp` (empty: build and deploy are skipped) |
+| `AWS_REGISTRY` | `<account>.dkr.ecr.ap-south-1.amazonaws.com/idea-board` |
+| `AWS_REGION` | `ap-south-1` |
+| `AWS_CI_ROLE_ARN` | Terraform output `github_ci_role_arn` |
+| `EKS_CLUSTER` | `idea-board` |
+| `GCP_REGISTRY` | `asia-south1-docker.pkg.dev/<project>/idea-board` |
+| `GCP_WIF_PROVIDER` | Terraform output `github_wif_provider` |
+| `GCP_CI_SERVICE_ACCOUNT` | Terraform output `github_ci_service_account` |
+| `GKE_CLUSTER`, `GKE_LOCATION` | `idea-board`, `asia-south1-a` |
+| `AI_BASE_URL`, `AI_MODEL` | Any OpenAI-compatible API. Empty means OpenRouter, `openrouter/free`. |
+
+Secret: `AI_API_KEY`. No cloud keys are stored in GitHub: CI logs in through OIDC
+(AWS) and Workload Identity Federation (GCP). All AI steps are fail-open, so an AI outage
+never fails the pipeline.
+
+## Switching clouds
+
+1. `terraform/tf.sh <cloud> apply` (both passes) and commit the inventory.
+2. Set `DEPLOY_TARGETS` to the new cloud.
+3. Run the `ci` workflow. The first run fills the empty registry.
+
+## Tearing down
+
+- **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
+  the VPC delete. Then run `terraform/tf.sh gcp destroy`.
+- **AWS:** run `terraform/tf.sh aws destroy`. Afterwards, check for an orphaned ALB,
+  security groups and the retained Postgres EBS volume. If the ALB is already gone, add
+  `-var enable_cloudfront=false -var install_addons=false`.
