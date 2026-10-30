@@ -11,6 +11,8 @@ google_project_service.apis["secretmanager.googleapis.com"]
 google_project_service.apis["servicenetworking.googleapis.com"]
 google_project_service.apis["sqladmin.googleapis.com"]
 google_project_service.apis["sts.googleapis.com"]
+module.argocd[0].helm_release.app
+module.argocd[0].helm_release.argocd
 module.artifact_registry.google_artifact_registry_repository.this
 module.cloudsql.data.google_project.this
 module.cloudsql.google_compute_global_address.psa
@@ -26,6 +28,7 @@ module.cloudsql.google_sql_database_instance.this
 module.cloudsql.google_sql_user.owner
 module.cloudsql.random_password.app
 module.cloudsql.random_password.owner
+module.dapr[0].helm_release.dapr
 module.github_wif.google_artifact_registry_repository_iam_member.push
 module.github_wif.google_iam_workload_identity_pool.github
 module.github_wif.google_iam_workload_identity_pool_provider.github
