@@ -16,11 +16,14 @@ terraform/
     ├── aws/alb-controller   AWS Load Balancer Controller (Ingress → ALB) + its IAM role
     ├── gcp/vpc              VPC, subnet (+ pod/service ranges), Cloud Router + NAT
     ├── gcp/gke              GKE Standard (zonal) + node pool (Workload Identity)
+    ├── gcp/artifact-registry  Artifact Registry Docker repo (images backend, frontend)
+    ├── gcp/github-wif       GitHub Actions → GCP login without keys (WIF + CI service account)
     └── common/argocd        Argo CD (same on both clouds) + Application → kustomize-apps/overlays/<cloud>
 ```
 
 Order inside each root: network → cluster → (ALB controller on AWS) → Argo CD.
-AWS step 1 (`install_addons = false`): only network + cluster.
+Step 1 (`install_addons = false`): network + cluster + registry + CI identity
+(GCP: + the app's static IP). Step 2 (`true`): Argo CD.
 After that, Argo CD deploys the app from `kustomize-apps/` in Git.
 
 ## Run

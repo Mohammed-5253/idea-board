@@ -1,8 +1,14 @@
 # Built-in GKE Ingress → external Google HTTP(S) Load Balancer. Health checks come from
 # each Service's pods' readinessProbe path.
+# HTTPS without a domain (GCP's answer to CloudFront): static IP from terraform/gcp
+# (google_compute_global_address "idea-board-ip") + Google-managed certificate for
+# <ip>.sslip.io (managed-certificate.yaml) + HTTP → HTTPS redirect (frontend-config.yaml).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: idea-board
   annotations:
-    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.class: gce # GKE still reads the annotation, not ingressClassName
+    kubernetes.io/ingress.global-static-ip-name: idea-board-ip
+    networking.gke.io/managed-certificates: idea-board
+    networking.gke.io/v1beta1.FrontendConfig: idea-board

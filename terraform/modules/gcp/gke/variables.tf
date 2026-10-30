@@ -11,7 +11,9 @@ variable "zone" {
 }
 
 variable "kubernetes_version" {
-  type = string
+  description = "Minimum control-plane version; null = release channel default."
+  type        = string
+  default     = null
 }
 
 variable "network_id" {

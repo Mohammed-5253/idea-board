@@ -12,9 +12,7 @@ resource "google_service_account" "nodes" {
 
 resource "google_project_iam_member" "nodes" {
   for_each = toset([
-    "roles/logging.logWriter",
-    "roles/monitoring.metricWriter",
-    "roles/monitoring.viewer",
+    "roles/container.defaultNodeServiceAccount", # logs, metrics (Google's minimal node role)
     "roles/artifactregistry.reader",
   ])
   project = var.project_id
@@ -26,8 +24,11 @@ resource "google_container_cluster" "this" {
   name     = var.name
   location = var.zone
 
-  # No default node pool; ours is below.
-  initial_node_count = 0
+  # Default pool: create with 1 node, then delete; ours is below. Works on every version.
+  # shortcut: deprecated (warning) – once the channel is >= 1.36.4-gke.1469000, drop
+  # remove_default_node_pool and set initial_node_count = 0.
+  remove_default_node_pool = true
+  initial_node_count       = 1
 
   network    = var.network_id
   subnetwork = var.subnet_id
@@ -39,7 +40,7 @@ resource "google_container_cluster" "this" {
   release_channel {
     channel = "REGULAR"
   }
-  min_master_version = var.kubernetes_version
+  min_master_version = var.kubernetes_version # null = channel default
 
   datapath_provider = "ADVANCED_DATAPATH"
 
@@ -97,4 +98,7 @@ resource "google_container_node_pool" "default" {
       enable_integrity_monitoring = true
     }
   }
+
+  # Nodes need their roles before they start (image pulls, logging).
+  depends_on = [google_project_iam_member.nodes]
 }

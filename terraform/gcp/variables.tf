@@ -47,8 +47,9 @@ variable "master_cidr" {
 
 # --- cluster ---------------------------------------------------------------
 variable "kubernetes_version" {
-  type    = string
-  default = "1.36"
+  description = "Minimum control-plane version, e.g. \"1.36\". null = REGULAR channel default (check: gcloud container get-server-config)."
+  type        = string
+  default     = null
 }
 
 variable "machine_type" {
@@ -64,7 +65,7 @@ variable "spot" {
 
 variable "node_count" {
   type    = number
-  default = 2
+  default = 1
 }
 
 variable "cluster_public_access_cidrs" {
@@ -73,10 +74,18 @@ variable "cluster_public_access_cidrs" {
   default     = []
 }
 
+# --- add-ons (step 2: Argo CD) ---------------------------------------------
+variable "install_addons" {
+  description = "false = everything except Argo CD (step 1). Set true for Argo CD (deploys the app)."
+  type        = bool
+  default     = false
+}
+
 # --- Argo CD ---------------------------------------------------------------
 variable "git_repo_url" {
-  description = "Git repo Argo CD watches, e.g. https://github.com/<you>/idea-board.git"
+  description = "Git repo Argo CD watches."
   type        = string
+  default     = "https://github.com/Mohammed-5253/idea-board.git"
 }
 
 variable "git_revision" {
@@ -95,4 +104,17 @@ variable "git_token" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+# --- CI (GitHub Actions) ---------------------------------------------------
+# Immutable numeric IDs (same as github_repo in terraform/aws): a renamed or re-created
+# repo with the same name can't use the CI identity.
+variable "github_owner_id" {
+  type    = string
+  default = "106949872"
+}
+
+variable "github_repository_id" {
+  type    = string
+  default = "1438023010"
 }

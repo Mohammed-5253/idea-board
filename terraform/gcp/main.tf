@@ -1,13 +1,22 @@
 # =============================================================================
 # ROOT terraform/gcp – wires the modules together, in order:
-#   1. vpc  →  2. gke  →  3. argocd
+#   1. vpc  →  2. gke  →  artifact-registry + github-wif (CI) + static IP  →  3. argocd
+# install_addons = false: everything except Argo CD (step 1, like AWS).
 # (Ingress needs no extra controller on GKE: the built-in one creates a Google LB.)
 # Each module lives in ../modules. Change behaviour with variables (terraform.tfvars).
 # =============================================================================
 
 # APIs this stack needs (enabling an already-enabled API is a no-op).
 resource "google_project_service" "apis" {
-  for_each           = toset(["compute.googleapis.com", "container.googleapis.com"])
+  for_each = toset([
+    "cloudresourcemanager.googleapis.com", # project IAM
+    "compute.googleapis.com",
+    "container.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com", # CI: SA impersonation
+    "sts.googleapis.com",            # CI: GitHub token → GCP token
+  ])
   service            = each.value
   disable_on_destroy = false
 }
@@ -39,8 +48,34 @@ module "gke" {
   node_count          = var.node_count
 }
 
+module "artifact_registry" {
+  source     = "../modules/gcp/artifact-registry"
+  name       = var.name
+  region     = var.region
+  depends_on = [google_project_service.apis]
+}
+
+module "github_wif" {
+  source               = "../modules/gcp/github-wif"
+  name                 = var.name
+  region               = var.region
+  github_owner_id      = var.github_owner_id
+  github_repository_id = var.github_repository_id
+  repository_name      = module.artifact_registry.repository_name
+  depends_on           = [google_project_service.apis]
+}
+
+# Fixed public IP for the app's Google LB (GCP's answer to CloudFront's free HTTPS URL):
+# the Ingress uses it by name, and <ip>.sslip.io resolves to it → Google-managed certificate.
+# Created by Terraform (not the Ingress) so the IP survives app redeploys.
+resource "google_compute_global_address" "app" {
+  name       = "${var.name}-ip"
+  depends_on = [google_project_service.apis]
+}
+
 module "argocd" {
   source       = "../modules/common/argocd"
+  count        = var.install_addons ? 1 : 0
   git_repo_url = var.git_repo_url
   git_revision = var.git_revision
   git_username = var.git_username
