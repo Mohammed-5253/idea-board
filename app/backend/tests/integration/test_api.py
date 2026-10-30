@@ -65,6 +65,7 @@ def test_unknown_route_uses_error_shape(client: TestClient) -> None:
 def test_health_ready_and_metrics(client: TestClient) -> None:
     assert client.get("/healthz").json() == {"status": "ok"}
     assert client.get("/readyz").json() == {"status": "ready"}
+    assert client.get("/api/version").json() == {"version": "dev"}
     client.get("/api/ideas")
     text = client.get("/metrics").text
     assert "http_server_requests_total" in text

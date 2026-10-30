@@ -8,6 +8,9 @@
 # IMAGE TAG    : <version.txt>-<short commit SHA>-<run number>, e.g. 1.0.0-a1b2c3d-42
 # AWS LOGIN    : GitHub OIDC → IAM role (terraform/modules/aws/github-oidc). NO AWS keys
 #                are stored in GitHub. Needs repository VARIABLE AWS_CI_ROLE_ARN.
+# GCP (opt-in) : same flow to Artifact Registry + kustomize-apps/overlays/gcp, ONLY when
+#                repository VARIABLES GCP_WIF_PROVIDER and GCP_CI_SERVICE_ACCOUNT are set
+#                (terraform/modules/gcp/github-wif outputs). Unset → GCP jobs are skipped.
 # SECURITY     : every action pinned to a commit SHA; each job gets only the permissions
 #                it needs.
 # =============================================================================
@@ -34,6 +37,8 @@ env:
   ECR_REGISTRY: 326435482847.dkr.ecr.ap-south-1.amazonaws.com
   ECR_PREFIX: idea-board
   OVERLAY: kustomize-apps/overlays/aws
+  GCP_REGISTRY: asia-south1-docker.pkg.dev/project-7e93dfd0-5ad8-4ac0-aec/idea-board
+  GCP_OVERLAY: kustomize-apps/overlays/gcp
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -148,6 +153,7 @@ jobs:
           platforms: linux/amd64 # EKS nodes are x86_64 (t3.large)
           push: true
           tags: ${{ env.REPO }}:${{ env.TAG }}
+          build-args: APP_VERSION=${{ env.TAG }} # backend serves it at /api/version; frontend ignores it
           labels: |
             org.opencontainers.image.version=${{ env.TAG }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -191,3 +197,97 @@ jobs:
           done
           exit 1
       - run: echo "Deployed tag \`$TAG\` → Argo CD will sync $OVERLAY" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # GCP: same build, pushed to Artifact Registry. Opt-in via repository variables.
+  build-push-gcp:
+    name: build · push gcp (${{ matrix.image }})
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.GCP_WIF_PROVIDER != ''
+    needs: [test-backend, test-frontend, version]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC token → GCP Workload Identity Federation
+    strategy:
+      matrix:
+        image: [backend, frontend]
+    env:
+      REPO: asia-south1-docker.pkg.dev/project-7e93dfd0-5ad8-4ac0-aec/idea-board/${{ matrix.image }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: asia-south1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp.outputs.access_token }}
+
+      # Artifact Registry tags are IMMUTABLE. A "Re-run" keeps the same tag → skip.
+      - id: exists
+        run: |
+          if docker manifest inspect "$REPO:$TAG" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$REPO:$TAG already exists – push skipped"
+          fi
+
+      - if: steps.exists.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: steps.exists.outputs.skip != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app/${{ matrix.image }}
+          platforms: linux/amd64 # GKE nodes are x86_64 (e2-standard-2)
+          push: true
+          tags: ${{ env.REPO }}:${{ env.TAG }}
+          build-args: APP_VERSION=${{ env.TAG }}
+          labels: |
+            org.opencontainers.image.version=${{ env.TAG }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # ---------------------------------------------------------------------------
+  update-manifests-gcp:
+    name: deploy · update kustomize-apps/overlays/gcp
+    needs: [version, build-push-gcp]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # push the tag-update commit to main
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - name: Set image tags (kustomize edit)
+        working-directory: ${{ env.GCP_OVERLAY }}
+        run: |
+          kustomize edit set image "backend=$GCP_REGISTRY/backend:$TAG"
+          kustomize edit set image "frontend=$GCP_REGISTRY/frontend:$TAG"
+          git diff
+      - name: Commit and push
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$GCP_OVERLAY/kustomization.yaml"
+          git commit -m "deploy(gcp): images $TAG" -m "Source commit: $GITHUB_SHA" -m "${COMMIT_MSG%%$'\n'*}"
+          # The AWS deploy job pushes to main at the same time → rebase and retry.
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
+      - run: echo "Deployed tag \`$TAG\` → Argo CD will sync $GCP_OVERLAY" >> "$GITHUB_STEP_SUMMARY"

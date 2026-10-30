@@ -12,6 +12,7 @@ def test_defaults_are_safe() -> None:
     s = Settings()
     assert s.fault_injection_rate == 0.0  # demo fault injection is OFF by default
     assert s.db_credentials_source is CredentialsSource.ENV
+    assert s.app_version == "dev"
 
 
 @pytest.mark.parametrize("rate", [-0.1, 1.5])
@@ -34,6 +35,8 @@ def test_password_never_in_repr() -> None:
 def test_env_vars_are_read(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DB_CREDENTIALS_SOURCE", "dapr")
     monkeypatch.setenv("DB_POOL_SIZE", "7")
+    monkeypatch.setenv("APP_VERSION", "1.2.0-abc1234-9")
     s = Settings()
     assert s.db_credentials_source is CredentialsSource.DAPR
     assert s.db_pool_size == 7
+    assert s.app_version == "1.2.0-abc1234-9"

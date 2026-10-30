@@ -7,6 +7,7 @@ APPROVED NON-BREAKING EXTRAS (Phase 0, Q15):
   GET /healthz  liveness  - "is the process alive?"   (never touches the DB)
   GET /readyz   readiness - "can I serve traffic?"    (DB answers SELECT 1)
   GET /metrics  Prometheus metrics
+  GET /api/version  running image tag (e.g. 1.1.0-a1b2c3d-42) - confirms which release is live
   /docs, /openapi.json are provided by FastAPI itself.
 
 WHY sync `def` handlers (not `async def`)?
@@ -98,6 +99,11 @@ def create_idea(payload: IdeaCreate, engine: EngineDep) -> IdeaOut:
 @router.get("/healthz", include_in_schema=False)
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/api/version", include_in_schema=False)  # under /api so the ingress routes it here
+def version(request: Request) -> dict[str, str]:
+    return {"version": request.app.state.settings.app_version}
 
 
 @router.get("/readyz", include_in_schema=False, response_model=None)

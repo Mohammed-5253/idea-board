@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     # rejects non-zero values in prod overlays except the explicitly-labelled demo release.
     fault_injection_rate: float = Field(default=0.0, ge=0.0, le=1.0)
 
+    # Image tag baked in by CI (Dockerfile ARG APP_VERSION); "dev" for local runs.
+    app_version: str = "dev"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

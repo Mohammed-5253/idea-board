@@ -3,13 +3,16 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
+  - managed-certificate.yaml
+  - frontend-config.yaml
 patches:
   - path: patch-config.yaml
   - path: patch-ingress.yaml
+# Artifact Registry repo created by terraform/modules/gcp/artifact-registry. The tag is set by CI.
 images:
   - name: backend
-    newName: asia-south1-docker.pkg.dev/<GCP_PROJECT_ID>/idea-board/backend
+    newName: asia-south1-docker.pkg.dev/project-7e93dfd0-5ad8-4ac0-aec/idea-board/backend
     newTag: latest
   - name: frontend
-    newName: asia-south1-docker.pkg.dev/<GCP_PROJECT_ID>/idea-board/frontend
+    newName: asia-south1-docker.pkg.dev/project-7e93dfd0-5ad8-4ac0-aec/idea-board/frontend
     newTag: latest
