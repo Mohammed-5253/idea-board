@@ -1,0 +1,12 @@
+# Google-managed TLS certificate (free, auto-renewed) for the app's static IP.
+# sslip.io is public DNS that resolves <a-b-c-d>.sslip.io → a.b.c.d, so no domain is needed.
+# Set the domain from `terraform output app_ip` (dots → dashes) BEFORE install_addons = true.
+# Status: kubectl -n idea-board describe managedcertificate idea-board (ACTIVE after ~15-60 min).
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: idea-board
+  namespace: idea-board
+spec:
+  domains:
+    - 34-95-97-108.sslip.io # e.g. 34-120-1-2.sslip.io
