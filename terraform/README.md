@@ -1,42 +1,76 @@
 # terraform/
 
-Modular layout: **modules** hold the code, the two **roots** (`aws/`, `gcp/`) only call
-modules and set variables.
+Two roots (`aws/`, `gcp/`) that only wire modules together and set variables. All logic
+lives in `modules/`. Argo CD is installed from charts vendored in this folder, so an apply
+never downloads charts.
 
 ```
 terraform/
-├── aws/                 root for AWS  (main.tf calls the modules below)
-├── gcp/                 root for GCP
+├── tf.sh                    wrapper: terraform + refresh <cloud>/inventory.txt
+├── aws/                     root for AWS (ap-south-1)
+├── gcp/                     root for GCP (asia-south1)
+├── argo-cd/                 vendored upstream argo-cd chart 10.11.6 (Argo CD v3.5.6)
+├── argocd-app/              our one-template chart: the idea-board Argo CD Application
 └── modules/
-    ├── aws/vpc              VPC, public + private subnets, NAT
-    ├── aws/eks              EKS + managed node group (IRSA, network policies) + EBS CSI driver
-    ├── aws/ecr              ECR repositories: backend, frontend
-    ├── aws/github-oidc      GitHub Actions → AWS login without keys (CI role, ECR push only)
-    ├── aws/cloudfront       free HTTPS URL (*.cloudfront.net) in front of the app ALB
-    ├── aws/alb-controller   AWS Load Balancer Controller (Ingress → ALB) + its IAM role
-    ├── gcp/vpc              VPC, subnet (+ pod/service ranges), Cloud Router + NAT
-    ├── gcp/gke              GKE Standard (zonal) + node pool (Workload Identity)
-    ├── gcp/artifact-registry  Artifact Registry Docker repo (images backend, frontend)
-    ├── gcp/github-wif       GitHub Actions → GCP login without keys (WIF + CI service account)
-    └── common/argocd        Argo CD (same on both clouds) + Application → kustomize-apps/overlays/<cloud>
+    ├── aws/vpc                VPC, public + private subnets, NAT
+    ├── aws/eks                EKS + managed node group (access entries, IRSA, network policies)
+    ├── aws/ecr                ECR repositories: backend, frontend
+    ├── aws/github-oidc        CI role for GitHub Actions (ECR push, eks:DescribeCluster)
+    ├── aws/alb-controller     AWS Load Balancer Controller (Ingress → ALB) + IAM role
+    ├── aws/cloudfront         free HTTPS URL (*.cloudfront.net) in front of the app ALB
+    ├── gcp/vpc                VPC, subnet with pod/service ranges, Cloud Router + NAT
+    ├── gcp/gke                zonal GKE Standard, Spot node pool, Workload Identity
+    ├── gcp/artifact-registry  Docker repository for backend and frontend
+    ├── gcp/github-wif         CI service account for GitHub Actions (Artifact Registry push, GKE clusterViewer)
+    └── common/argocd          Argo CD + Application, plus read-only RBAC for CI verify-deploy
 ```
 
-Order inside each root: network → cluster → (ALB controller on AWS) → Argo CD.
-Step 1 (`install_addons = false`): network + cluster + registry + CI identity
-(GCP: + the app's static IP). Step 2 (`true`): Argo CD.
-After that, Argo CD deploys the app from `kustomize-apps/` in Git.
+## Apply
 
-## Run
+Each cloud is built in two passes:
 
-```bash
-cd terraform/aws        # or terraform/gcp
-cp terraform.tfvars.example terraform.tfvars   # fill in your values (git-ignored)
-terraform init
-terraform plan
-terraform apply
+1. `install_addons = false`: network, cluster, registry, CI identity
+   (GCP also creates the app's static IP).
+2. `install_addons = true`: ALB controller (AWS only) and Argo CD. From then on, Argo CD
+   deploys `kustomize-apps/overlays/<cloud>` from Git.
+
+```sh
+cd terraform/gcp && cp terraform.tfvars.example terraform.tfvars   # AWS: defaults in variables.tf
+terraform -chdir=terraform/gcp init
+terraform/tf.sh gcp plan
+terraform/tf.sh gcp apply
 ```
 
-State is local for now (`terraform.tfstate`, git-ignored). A remote backend (S3 / GCS)
-can be added later in `versions.tf`.
+`tf.sh` runs the terraform command, then writes `terraform state list` to
+`<cloud>/inventory.txt`. That file holds resource addresses only, never attribute values,
+so it contains no secrets. The PR infra-compatibility check in CI reads it, so commit it after every
+apply or destroy. If you ran plain `terraform`, refresh it with `terraform/tf.sh <cloud> plan`.
 
-Not here yet (later steps): database, container registry, Dapr, Karpenter, cloud-agnostic layer.
+After the first apply, copy the CI outputs (`github_ci_role_arn`, `github_wif_provider`,
+`github_ci_service_account`) into the GitHub repository variables listed in the
+[main README](../README.md#configuration).
+
+Private repo: never put the Git token in a file. Export it instead:
+`export TF_VAR_git_username=<user> TF_VAR_git_token=<read-only token>`.
+
+## State
+
+State is local (`<cloud>/terraform.tfstate`, git-ignored). A remote backend
+(S3 / GCS) can be added in `versions.tf` later.
+
+## Destroy
+
+- **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
+  the VPC delete. Then run `terraform/tf.sh gcp destroy`. The Workload Identity pool ID
+  is soft-deleted for 30 days. Recreating it within that time needs
+  `gcloud iam workload-identity-pools undelete`.
+- **AWS:** run `terraform/tf.sh aws destroy`. If the ALB is already gone, add
+  `-var enable_cloudfront=false -var install_addons=false`. Afterwards, check for an orphaned
+  `k8s-ideaboar-…` ALB, its security groups and target groups, and the retained Postgres
+  EBS volume.
+
+## Updating the Argo CD chart
+
+Copy the new upstream chart over `argo-cd/`, then delete its `redis-ha` dependency block
+from `Chart.yaml`. We never enable redis-ha, and Helm refuses a declared dependency
+that is missing from `charts/`.

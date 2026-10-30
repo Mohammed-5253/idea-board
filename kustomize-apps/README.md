@@ -1,22 +1,34 @@
 # kustomize-apps/
 
+Kubernetes manifests for the app. Argo CD (installed by `terraform/`) syncs
+`overlays/aws` on EKS and `overlays/gcp` on GKE.
+
 ```
 kustomize-apps/
-├── base/                     same on every cloud
-│   ├── namespace.yaml          idea-board (Pod Security "restricted")
-│   ├── configmap.yaml          non-secret settings
-│   ├── secret.yaml             DB passwords: owner + app user (placeholders only!)
+├── base/                      same on every cloud
+│   ├── namespace.yaml           idea-board (Pod Security "restricted")
+│   ├── configmap.yaml           non-secret settings
+│   ├── secret.yaml              DB passwords (placeholders only)
 │   ├── serviceaccounts.yaml
-│   ├── postgres-statefulset.yaml · postgres-service.yaml   in-cluster PostgreSQL 17
-│   ├── backend-deployment.yaml · backend-service.yaml
-│   ├── frontend-deployment.yaml · frontend-service.yaml
-│   └── ingress.yaml            /api → backend, / → frontend
+│   ├── postgres-*.yaml          in-cluster PostgreSQL 17 (StatefulSet)
+│   ├── backend-*.yaml           FastAPI Deployment + Service
+│   ├── frontend-*.yaml          nginx Deployment + Service
+│   └── ingress.yaml             /api → backend, / → frontend
 └── overlays/
-    ├── aws/                  ECR images + ALB ingress + gp3 default StorageClass
-    └── gcp/                  image registry (Artifact Registry) + GKE ingress class
+    ├── aws/                   ECR images, ALB ingress, gp3 default StorageClass
+    └── gcp/                   Artifact Registry images, GKE ingress, static IP,
+                               ManagedCertificate (<ip>.sslip.io) + HTTPS redirect
 ```
 
-Argo CD (installed by `terraform/`) syncs `overlays/aws` on EKS and `overlays/gcp` on GKE.
-Preview what will be applied: `kubectl kustomize kustomize-apps/overlays/aws`.
+The `images:` tags in each overlay are written by CI (`deploy(<cloud>): images <tag>`
+commits). Don't edit them by hand except to roll back: set the previous tag and push,
+and Argo CD redeploys it.
 
-Replace `<AWS_ACCOUNT_ID>` / `<GCP_PROJECT_ID>` in the overlay `images:` once the registries exist.
+When you merge a long-lived branch, merge `origin/main` into it first. Otherwise an
+old overlay tag can overwrite the live one.
+
+Preview the rendered manifests:
+
+```sh
+kubectl kustomize kustomize-apps/overlays/gcp
+```
