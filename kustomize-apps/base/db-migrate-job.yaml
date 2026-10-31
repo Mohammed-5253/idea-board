@@ -52,10 +52,7 @@ spec:
               DB_USER="$BOOTSTRAP_OWNER_USER" DB_PASSWORD="$BOOTSTRAP_OWNER_PASSWORD"
               alembic upgrade head
           # No backend-config here: a PreSync hook runs BEFORE this sync updates the ConfigMap,
-          # so it would see the previous revision's values.
-          env:
-            - name: DB_CREDENTIALS_SOURCE
-              value: env
+          # so it would see the previous revision's values. Everything comes from the Secret.
           envFrom:
             - secretRef:
                 name: db-migrate

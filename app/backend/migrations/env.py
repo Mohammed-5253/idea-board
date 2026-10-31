@@ -1,9 +1,9 @@
 """Alembic runtime environment: how migrations connect to the database.
 
 WHAT:  Called by `alembic upgrade/downgrade`. Builds the Engine from the SAME credentials
-       mechanism as the app (core/secrets.py): env vars locally, Dapr secrets in compose/K8s.
+       mechanism as the app (core/secrets.py): the DB_* env vars.
 WHY:   One credentials path for everything = fewer secrets, fewer surprises.
-       The migrate Job simply points DAPR_DB_SECRET_NAME at the OWNER secret (migrations
+       The migrate Job / compose service sets DB_USER/DB_PASSWORD to the OWNER (migrations
        need DDL rights; the app role deliberately does not have them).
 IF Alembic is invoked by tests with an existing connection (config.attributes["connection"])
 THEN we reuse it, so tests can migrate a Testcontainers database without env vars.

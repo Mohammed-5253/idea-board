@@ -2,8 +2,7 @@
 
 WHAT:  When OTEL_EXPORTER_OTLP_ENDPOINT is set (Kubernetes: http://otel-collector...:4318),
        every HTTP request becomes a span (FastAPI auto-instrumentation) and spans are batched
-       to the OpenTelemetry Collector. The Dapr sidecar exports its own spans to the same
-       collector, so one request shows app + sidecar timing together.
+       to the OpenTelemetry Collector.
 WHY OPT-IN?  Local runs, tests and docker-compose have no collector; exporting there would
        only produce connection errors. Unset endpoint = tracing fully disabled (zero cost).
 CONFIG (standard OTel env vars, so ops can tune without code changes):

@@ -12,7 +12,6 @@
 #   (the venv lives in the image; only source code is hot-reloaded).
 # COMMON MISTAKE: editing code and seeing no change in prod-like mode – that mode runs the
 #   built images; use dev mode (this file) for live reload.
-# LEARN: docs/learning/13-docker-compose-and-dapr-local.md §5
 # =============================================================================
 
 services:

@@ -7,6 +7,5 @@ metadata:
 data:
   APP_ENV: base
   LOG_LEVEL: INFO
-  # DB_* (host, user, password, sslmode…) come from Secret backend-db / db-migrate (terraform).
-  DB_CREDENTIALS_SOURCE: env
+  # DB_* (host, user, password, sslmode…) come from Secret backend-db (terraform), not here.
   FAULT_INJECTION_RATE: "0"

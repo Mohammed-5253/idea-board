@@ -7,7 +7,7 @@ WHY a factory?  Tests build isolated apps with their own Settings/Engine
        (`create_app(settings, engine)`), with no global state leaking between tests.
 
 LIFECYCLE (lifespan):
-  startup : load DB credentials (env or Dapr) -> create the Engine (lazy, no connection yet)
+  startup : load DB credentials (DB_* env vars) -> create the Engine (lazy, no connection yet)
   shutdown: dispose the pool (close connections cleanly so PostgreSQL doesn't log
             "unexpected EOF" and slots are freed immediately during rolling updates).
   IF the DB is down at startup THEN we still start (the engine is lazy): /healthz is OK,
@@ -70,7 +70,6 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
                 "startup",
                 version=__version__,
                 env=cfg.app_env,
-                credentials_source=cfg.db_credentials_source.value,
                 db_host=creds.host,
                 db_name=creds.dbname,
                 fault_injection_rate=cfg.fault_injection_rate,

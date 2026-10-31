@@ -5,7 +5,7 @@
 # WHAT: The PRODUCTION-LIKE local stack, using the same images and the same startup
 #       sequence as Kubernetes:
 #         db (PostgreSQL 17) → db-bootstrap (app role) → migrate (Alembic)
-#           → backend (+ backend-dapr sidecar) → frontend (nginx, proxies /api)
+#           → backend → frontend (nginx, proxies /api)
 # HOW:
 #   docker compose up --build             # dev mode (this file + docker-compose.override.yml)
 #   docker compose -f docker-compose.yml up --build -d --wait   # prod-like only
@@ -16,17 +16,14 @@
 # DESIGN NOTES
 # * Health-based startup order: `depends_on.condition` waits for health checks or for
 #   one-shot jobs to EXIT 0. IF migrations fail THEN the backend never starts (fail fast,
-#   same behaviour as the Argo CD PreSync hooks in Kubernetes).
-# * Dapr sidecar: `backend-dapr` shares the backend's network namespace
-#   (`network_mode: service:backend`), so the backend reaches Dapr at localhost:3500 –
-#   exactly like a sidecar container in a Kubernetes pod.
-# * Secrets: the Dapr local secret file is rendered by Compose from env vars (`configs:`
-#   with inline content) – no generated files, no init container, nothing committed.
+#   same behaviour as the Argo CD PreSync db-migrate Job in Kubernetes).
+# * Database: a local PostgreSQL container (never RDS / Cloud SQL). Credentials are plain
+#   DB_* env vars, as on EKS/GKE (there they come from terraform-written Secrets).
+#   Throwaway local passwords; override with LOCAL_DB_OWNER_PASSWORD / LOCAL_DB_APP_PASSWORD.
 # * Ports bind to 127.0.0.1 only. SECURITY NOTE: binding to 0.0.0.0 would expose the DB
 #   and API to anyone on your Wi-Fi.
 # PRODUCTION NOTE: compose is the developer environment only; production runs on
 #   Kubernetes (EKS/GKE) with managed PostgreSQL (Phases 6–8).
-# LEARN: docs/learning/13-docker-compose-and-dapr-local.md
 # =============================================================================
 
 name: idea-board
@@ -71,14 +68,13 @@ services:
 
   # -------------------------------------------------------------------------
   # One-shot: create the least-privileged app role (runs as the DB owner)
-  # Kubernetes equivalent: Argo CD PreSync hook Job, sync-wave -2.
+  # Kubernetes equivalent: step 1 of the db-migrate Job (Argo CD PreSync hook).
   # -------------------------------------------------------------------------
   db-bootstrap:
     <<: *backend-image
     command: ["idea-board-db-bootstrap"]
     environment:
       <<: *db-env
-      DB_CREDENTIALS_SOURCE: env
       DB_USER: ideas_app
       DB_PASSWORD: ${LOCAL_DB_APP_PASSWORD:-app-local-dev-only}
       BOOTSTRAP_OWNER_USER: owner
@@ -93,14 +89,13 @@ services:
 
   # -------------------------------------------------------------------------
   # One-shot: apply database migrations (owner credentials: DDL rights)
-  # Kubernetes equivalent: Argo CD PreSync hook Job, sync-wave -1.
+  # Kubernetes equivalent: step 2 of the db-migrate Job (Argo CD PreSync hook).
   # -------------------------------------------------------------------------
   migrate:
     <<: *backend-image
     command: ["alembic", "upgrade", "head"]
     environment:
       <<: *db-env
-      DB_CREDENTIALS_SOURCE: env
       DB_USER: owner
       DB_PASSWORD: ${LOCAL_DB_OWNER_PASSWORD:-owner-local-dev-only}
     depends_on:
@@ -111,49 +106,21 @@ services:
       disable: true
 
   # -------------------------------------------------------------------------
-  # The API. Gets its DB credentials from the Dapr sidecar (DB_CREDENTIALS_SOURCE=dapr),
-  # proving locally the same code path used on AWS and GCP.
+  # The API, as the least-privileged app role (SELECT/INSERT only), like on EKS/GKE.
   # -------------------------------------------------------------------------
   backend:
     <<: *backend-image
     environment:
       <<: *db-env
-      DB_CREDENTIALS_SOURCE: dapr
-      DAPR_HTTP_PORT: "3500"
-      DAPR_SECRET_STORE: secretstore
-      DAPR_DB_SECRET_NAME: idea-board-db-app
+      DB_USER: ideas_app
+      DB_PASSWORD: ${LOCAL_DB_APP_PASSWORD:-app-local-dev-only}
       FAULT_INJECTION_RATE: ${FAULT_INJECTION_RATE:-0}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"   # direct API access: /docs, /metrics, curl
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # Uses the image HEALTHCHECK (/readyz). start_period covers the Dapr sidecar start.
-    restart: unless-stopped
-
-  # -------------------------------------------------------------------------
-  # Dapr sidecar for the backend (Dapr 1.18.9, ADR-018). No placement/scheduler: we use
-  # no actors, workflows or jobs, so those control-plane services are not needed.
-  # -------------------------------------------------------------------------
-  backend-dapr:
-    image: daprio/daprd:1.18.9@sha256:95889439170fc923b8a04d7849331dc83ff3d6a63cb22252e0f19f68a191c34c
-    command:
-      - /daprd
-      - --app-id=backend
-      - --app-port=8000
-      - --dapr-http-port=3500
-      - --resources-path=/components
-      - --log-as-json
-      - --enable-metrics=false
-    network_mode: "service:backend"   # share the backend's localhost (sidecar pattern)
-    volumes:
-      - ./dapr/components/local:/components:ro
-    configs:
-      - source: dapr_local_secrets
-        target: /run/dapr-secrets/secrets.json
-    depends_on:
-      backend:
-        condition: service_started   # the shared network namespace must exist first
+    # Uses the image HEALTHCHECK (/readyz).
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
@@ -182,7 +149,6 @@ services:
     command: ["idea-board-seed"]
     environment:
       <<: *db-env
-      DB_CREDENTIALS_SOURCE: env
       DB_USER: ideas_app
       DB_PASSWORD: ${LOCAL_DB_APP_PASSWORD:-app-local-dev-only}
     depends_on:
@@ -204,22 +170,6 @@ services:
     ports:
       - "127.0.0.1:11434:11434"
     restart: unless-stopped
-
-configs:
-  # Rendered by Compose at `up` time from env vars (inline `content`), mounted read-only
-  # into the Dapr sidecar. Shape matches multiValued local.file: one key per secret.
-  dapr_local_secrets:
-    content: |
-      {
-        "idea-board-db-app": {
-          "username": "ideas_app",
-          "password": "${LOCAL_DB_APP_PASSWORD:-app-local-dev-only}",
-          "host": "db",
-          "port": "5432",
-          "dbname": "ideas",
-          "sslmode": "disable"
-        }
-      }
 
 volumes:
   pgdata:

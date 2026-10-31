@@ -10,14 +10,13 @@ WHY:   Least privilege (ADR-020, architecture 03 §2): the API runs with a role 
        not "destroy the database".
 WHY a Job and not Terraform?  AWS has no API to create PostgreSQL roles inside RDS (GCP does),
        so we use this one SQL script on BOTH clouds for symmetry (ADR-040, R-3).
-ORDER: runs BEFORE migrations (Argo CD PreSync wave -2) - grants for the table are applied
-       via ALTER DEFAULT PRIVILEGES so they also cover the table that migrations create next,
-       and are re-applied directly if the table already exists.
+ORDER: runs BEFORE migrations (db-migrate Job; compose: before `migrate`) - grants for the
+       table are applied via ALTER DEFAULT PRIVILEGES so they also cover the table that
+       migrations create next, and are re-applied directly if the table already exists.
 
 INPUTS (env vars):
-  Owner connection: BOOTSTRAP_OWNER_* env vars or `.env` (or, in Dapr mode, the secret
-                    named by DAPR_DB_OWNER_SECRET_NAME)
-  App role:         the normal app credentials (DB_USER/DB_PASSWORD or the Dapr app secret)
+  Owner connection: BOOTSTRAP_OWNER_* env vars or `.env`
+  App role:         the normal app credentials (DB_USER/DB_PASSWORD)
 HOW TO RUN: uv run idea-board-db-bootstrap
 SECURITY NOTE: role and database names are passed through `psycopg.sql.Identifier` and the
        password through a bound literal - never string-formatted into SQL.
@@ -35,7 +34,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from idea_board.core.logging import configure_logging, get_logger
 from idea_board.core.secrets import DbCredentials, load_db_credentials
-from idea_board.core.settings import CredentialsSource, Settings
+from idea_board.core.settings import Settings
 
 log = get_logger(__name__)
 
@@ -56,17 +55,10 @@ class OwnerSettings(BaseSettings):
     bootstrap_owner_db: str | None = None
     # Database used to run CREATE DATABASE (every PostgreSQL server has "postgres").
     bootstrap_maintenance_db: str = "postgres"
-    # Dapr mode: the owner secret's name in the same secret store.
-    dapr_db_owner_secret_name: str = "idea-board-db-owner"  # noqa: S105 (a name, not a password)
 
 
 def _owner_credentials(app_settings: Settings, owner: OwnerSettings) -> DbCredentials:
-    """Owner credentials: same source mechanism as the app, different secret/user."""
-    if app_settings.db_credentials_source is CredentialsSource.DAPR:
-        owner_app_settings = app_settings.model_copy(
-            update={"dapr_db_secret_name": owner.dapr_db_owner_secret_name}
-        )
-        return load_db_credentials(owner_app_settings)
+    """Owner credentials: BOOTSTRAP_OWNER_*, defaulting to the app's host/port/db."""
     if not owner.bootstrap_owner_user or not owner.bootstrap_owner_password.get_secret_value():
         raise ValueError("Set BOOTSTRAP_OWNER_USER and BOOTSTRAP_OWNER_PASSWORD (env or .env)")
     return DbCredentials(

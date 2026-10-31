@@ -33,17 +33,23 @@ kustomize-apps/     Kubernetes manifests: base/ + overlays/aws, overlays/gcp
 terraform/          aws/ and gcp/ roots, shared modules/, vendored Helm charts
 ci/ai/assist.py     AI helper used by the workflows (no third-party packages)
 .github/workflows/  ci.yml (build + deploy), ai-assist.yml (AI review + release notes)
-docker-compose.yml  full stack locally (still uses a Dapr sidecar for the DB secret; the clouds don't)
+docker-compose.yml  full stack locally with a PostgreSQL 17 container (no cloud DB)
 version.txt         app version; part of every image tag
 ```
 
 ## Run locally
 
 ```sh
-docker compose up --build                       # http://localhost:8080
+docker compose up --build                       # dev mode (hot reload): http://localhost:8080
+docker compose -f docker-compose.yml up --build # prod-like: the same images as the clusters
 docker compose --profile tools run --rm seed    # optional sample data
 docker compose down -v                          # stop and wipe the database
 ```
+
+Locally the database is a `postgres:17-alpine` container (port `127.0.0.1:55432`, volume
+`pgdata`), never RDS or Cloud SQL. Startup order matches the clusters: `db-bootstrap`
+(owner creates the app user) → `migrate` (Alembic as owner) → `backend` (app user only)
+→ `frontend`. All credentials are plain `DB_*` env vars with throwaway local defaults.
 
 ## Deploy to a cloud
 

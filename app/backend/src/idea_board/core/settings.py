@@ -10,41 +10,25 @@ OUTPUTS: a validated `Settings` instance; the app refuses to start on invalid co
 HOW TO TEST: tests/unit/test_settings.py
 
 SECURITY NOTE: secrets (the DB password) are `SecretStr`, so they never appear in
-       `repr()`, logs or tracebacks. In the cloud the password is NOT an env var at all:
-       `DB_CREDENTIALS_SOURCE=dapr` makes the app fetch it from the Dapr secrets API
-       (ADR-020), which reads AWS Secrets Manager / GCP Secret Manager.
+       `repr()`, logs or tracebacks. In the cloud the DB_* values come from a Kubernetes
+       Secret written by terraform, never from Git.
 ALTERNATIVE: plain `os.environ[...]` - no types, no validation, typos found at runtime.
 LEARN: docs/learning/10-backend-python-fastapi.md §5, §6 (settings walkthrough)
 """
 
 from __future__ import annotations
 
-from enum import StrEnum
 from functools import lru_cache
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class CredentialsSource(StrEnum):
-    """Where the backend gets its database credentials from.
-
-    env  -> DB_USER / DB_PASSWORD / DB_HOST … environment variables. Used by local runs
-            outside containers and by tests. Simple, but the secret lives in the env.
-    dapr -> Dapr secrets API (http://localhost:<DAPR_HTTP_PORT>/v1.0/secrets/...).
-            Used in docker-compose and Kubernetes. The app holds no cloud SDK and the
-            password never appears in YAML, Git, or the pod spec.
-    """
-
-    ENV = "env"
-    DAPR = "dapr"
-
-
 class Settings(BaseSettings):
     """All runtime configuration. Field names map to UPPER_CASE env vars automatically."""
 
     # `extra="ignore"`: the container environment contains many unrelated variables
-    # (PATH, KUBERNETES_*, DAPR_*); we must not crash on them.
+    # (PATH, KUBERNETES_*, …); we must not crash on them.
     # `frozen=True`: settings are read once at startup and never mutated at runtime.
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
@@ -56,31 +40,19 @@ class Settings(BaseSettings):
     # the F1 AI health analyst both expect one JSON object per line.
     log_pretty: bool = False
 
-    # --- Database credentials source -------------------------------------------------
-    db_credentials_source: CredentialsSource = CredentialsSource.ENV
-
-    # Used when db_credentials_source=env (and as defaults merged with the Dapr secret).
+    # --- Database connection (DB_* env vars) -----------------------------------------
     db_host: str = "localhost"
     db_port: int = Field(default=5432, ge=1, le=65535)
     db_name: str = "ideas"
     db_user: str = "ideas_app"
     db_password: SecretStr = SecretStr("")
     # TLS to PostgreSQL. `prefer` locally (the dev container has no TLS);
-    # IF deployed to RDS / Cloud SQL THEN the overlays set `require` (both enforce TLS).
+    # IF deployed to RDS / Cloud SQL THEN the terraform-written Secret sets `require`
+    # (both enforce TLS).
     # PRODUCTION NOTE: `verify-full` + the provider CA bundle is the hardened setting.
     db_sslmode: str = Field(
         default="prefer", pattern="^(disable|prefer|require|verify-ca|verify-full)$"
     )
-
-    # Used when db_credentials_source=dapr.
-    dapr_http_port: int = Field(default=3500, ge=1, le=65535)
-    # Component NAME, identical on every cloud (ADR-018): only the component YAML differs.
-    # (S105 suppressed below: a component NAME, not a password - Bandit false positive.)
-    dapr_secret_store: str = "secretstore"  # noqa: S105
-    # Secret name inside the store, e.g. "idea-board-db-app" (one per environment).
-    dapr_db_secret_name: str = "idea-board-db-app"  # noqa: S105
-    # How long to keep retrying while the Dapr sidecar starts (it may start after us).
-    dapr_startup_timeout_s: float = Field(default=60.0, gt=0)
 
     # --- Connection pool (D-35, ADR-013) ---------------------------------------------
     # SCALE NOTE: total DB connections = replicas x (pool_size + max_overflow).
