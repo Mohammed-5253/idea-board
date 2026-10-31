@@ -19,14 +19,16 @@ uv run pytest tests/integration   # needs Docker (testcontainers PostgreSQL)
 ```
 
 The whole stack (DB, migrations, Dapr sidecar, frontend) runs from the repo root with
-`docker compose up --build`.
+`docker compose up --build`. Dapr is used only there; on EKS/GKE the credentials come
+from env vars (Kubernetes Secrets written by terraform).
 
 ## Configuration
 
 Every field in `src/idea_board/core/settings.py` is read from the UPPER_CASE environment
 variable of the same name, for example `DB_HOST`, `LOG_LEVEL` or `APP_VERSION`.
-Database credentials come from env vars or from a Dapr secret store
-(`DB_CREDENTIALS_SOURCE`).
+Database credentials come from env vars (`DB_CREDENTIALS_SOURCE=env`, used on EKS/GKE) or
+from a Dapr secret store (`dapr`, local docker compose only).
 
-Console scripts: `idea-board-db-bootstrap` creates the app role, and `idea-board-seed`
-adds sample data.
+Console scripts: `idea-board-db-bootstrap` creates the app role (in the cloud it runs in
+the `db-migrate` Job with `BOOTSTRAP_OWNER_USER/PASSWORD`), and `idea-board-seed` adds
+sample data.

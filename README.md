@@ -6,7 +6,8 @@ GitHub Actions with an AI assistant for reviews and failure analysis.
 
 The database is managed PostgreSQL: RDS on AWS, Cloud SQL on GCP (smallest instances).
 The backend never sees cloud-specific config. Terraform writes the DB connection details
-into the Kubernetes Secret `backend-db`, which the backend reads as env vars.
+into two Kubernetes Secrets: `db-migrate` (owner user) for the migration Job, and
+`backend-db` (app user, SELECT/INSERT only) for the API, which reads it as env vars.
 
 ## How it fits together
 
@@ -19,7 +20,8 @@ Run workflow (pick aws / gcp / aws,gcp)
                                                    │
                          CI verify-deploy waits for Synced + Healthy, opens an issue if not
 
-backend pod ─► env from Secret backend-db (terraform) ─► RDS / Cloud SQL
+Argo CD sync:  PreSync Job db-migrate (owner user: create app user + alembic upgrade)
+               └─► then Deployments: backend pod (app user, Secret backend-db) ─► RDS / Cloud SQL
 ```
 
 ## Repository layout
@@ -31,7 +33,7 @@ kustomize-apps/     Kubernetes manifests: base/ + overlays/aws, overlays/gcp
 terraform/          aws/ and gcp/ roots, shared modules/, vendored Helm charts
 ci/ai/assist.py     AI helper used by the workflows (no third-party packages)
 .github/workflows/  ci.yml (build + deploy), ai-assist.yml (AI review + release notes)
-docker-compose.yml  full stack locally, including a Dapr sidecar
+docker-compose.yml  full stack locally (still uses a Dapr sidecar for the DB secret; the clouds don't)
 version.txt         app version; part of every image tag
 ```
 
@@ -60,9 +62,11 @@ terraform/tf.sh gcp plan
 terraform/tf.sh gcp apply     # also writes terraform/gcp/inventory.txt – commit it
 ```
 
-Terraform state is local and git-ignored. The Argo CD charts live in
-`terraform/argo-cd` and `terraform/argocd-app`, so an apply never
-downloads charts.
+State and tfvars live outside the repo, in `../terraform-state-idea-board/<root>/`
+(`aws`, `gcp`, `budget-aws`, `budget-gcp`). `tf.sh` loads that folder's `terraform.tfvars`;
+plain `terraform plan/apply` would not. Only `inventory.txt` stays in the repo, for CI.
+The Argo CD charts live in `terraform/argo-cd` and `terraform/argocd-app`, so an apply
+never downloads charts.
 
 Monthly budgets (about $25 per cloud, e-mail alerts only, no hard stop) are separate roots
 in `terraform/budget/`.

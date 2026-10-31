@@ -6,7 +6,7 @@ so an apply never downloads charts.
 
 ```
 terraform/
-├── tf.sh                    wrapper: terraform + refresh <cloud>/inventory.txt
+├── tf.sh                    wrapper: external tfvars + terraform + refresh <cloud>/inventory.txt
 ├── budget/{aws,gcp}         monthly cost budgets ($25, e-mail alerts only), kept across app destroys
 ├── aws/                     root for AWS (ap-south-1)
 ├── gcp/                     root for GCP (asia-south1)
@@ -19,14 +19,14 @@ terraform/
     ├── aws/github-oidc        CI role for GitHub Actions (ECR push, eks:DescribeCluster)
     ├── aws/alb-controller     AWS Load Balancer Controller (Ingress → ALB) + IAM role
     ├── aws/cloudfront         free HTTPS URL (*.cloudfront.net) in front of the app ALB
-    ├── aws/rds                RDS PostgreSQL 17 (db.t4g.micro), one DB user
+    ├── aws/rds                RDS PostgreSQL 17 (db.t4g.micro), owner + app passwords
     ├── gcp/vpc                VPC, subnet with pod/service ranges, Cloud Router + NAT
     ├── gcp/gke                zonal GKE Standard, Spot node pool, Workload Identity
     ├── gcp/artifact-registry  Docker repository for backend and frontend
-    ├── gcp/cloudsql           Cloud SQL PostgreSQL 17 (db-f1-micro, private IP), one DB user
+    ├── gcp/cloudsql           Cloud SQL PostgreSQL 17 (db-f1-micro, private IP), owner + app passwords
     ├── gcp/github-wif         CI service account for GitHub Actions (Artifact Registry push, GKE clusterViewer)
     ├── common/argocd          Argo CD + Application, plus read-only RBAC for CI verify-deploy
-    └── common/app-db-secret   namespace idea-board + Secret backend-db (DB_HOST/DB_USER/DB_PASSWORD…)
+    └── common/app-db-secret   namespace idea-board + Secrets backend-db (app user) and db-migrate (owner)
 ```
 
 ## Apply
@@ -34,7 +34,7 @@ terraform/
 Each cloud is built in two passes:
 
 1. `install_addons = false`: network, cluster, registry, CI identity, managed PostgreSQL
-   (RDS / Cloud SQL), the app namespace and its DB Secret. GCP also creates the app's static IP.
+   (RDS / Cloud SQL), the app namespace and its two DB Secrets. GCP also creates the app's static IP.
 2. `install_addons = true`: ALB controller (AWS only) and Argo CD. From then on, Argo CD
    deploys `kustomize-apps/overlays/<cloud>` from Git.
 3. AWS only: once Argo CD has created the app ALB, apply again with
@@ -69,19 +69,33 @@ out at 50%, 80% and 100% of actual spend and at 100% forecast. AWS sends them to
 
 ```sh
 echo 'alert_emails = ["<you@example.com>"]' > ../terraform-state-idea-board/budget-aws/terraform.tfvars
-terraform -chdir=terraform/budget/aws init && terraform -chdir=terraform/budget/aws apply
-terraform -chdir=terraform/budget/gcp init && terraform -chdir=terraform/budget/gcp apply   # ₹2100 (≈ $25): the billing account is in INR
+terraform -chdir=terraform/budget/aws init && terraform/tf.sh budget/aws apply
+terraform -chdir=terraform/budget/gcp init && terraform/tf.sh budget/gcp apply   # ₹2100 (≈ $25): the billing account is in INR
 ```
 
-## State
+## State and tfvars
 
-State is local (`<cloud>/terraform.tfstate`, git-ignored). A remote backend
-(S3 / GCS) can be added in `versions.tf` later.
+Both live outside the repo, next to it:
+
+```
+../terraform-state-idea-board/
+├── aws/         terraform.tfstate, terraform.tfvars
+├── gcp/         terraform.tfstate, terraform.tfvars, terraform.tfvars.example
+├── budget-aws/  terraform.tfstate, terraform.tfvars
+└── budget-gcp/  terraform.tfstate
+```
+
+Each root's `backend "local"` path points there (relative, so the repo and that folder
+must stay siblings). Terraform only auto-loads `terraform.tfvars` from the root folder,
+so run plan/apply/destroy/import through `tf.sh`, which passes it as `-var-file`. The
+state holds the DB passwords: keep the folder private and back it up. A remote backend
+(S3 / GCS) can replace it later in `versions.tf`.
 
 ## Destroy
 
 - **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
-  the VPC delete. Then run `terraform/tf.sh gcp destroy`. Cloud SQL is destroyed without
+  the VPC delete (terraform then just forgets the already-deleted namespace and Secrets).
+  Then run `terraform/tf.sh gcp destroy`. Cloud SQL is destroyed without
   backups (data is lost). The Workload Identity pool ID is soft-deleted for 30 days. Recreating it within that time needs
   `gcloud iam workload-identity-pools undelete`.
 - **AWS:** run `terraform/tf.sh aws destroy`. If the ALB is already gone, add
