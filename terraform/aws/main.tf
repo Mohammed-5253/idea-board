@@ -1,9 +1,9 @@
 # =============================================================================
 # ROOT terraform/aws – wires the modules together, in order:
-#   1. vpc  →  2. eks (+ EBS CSI driver)  →  ecr + github-oidc (CI role) + rds (PostgreSQL + secrets)
-#   →  3. alb-controller (Ingress → ALB) + dapr  →  4. argocd
+#   1. vpc  →  2. eks (+ EBS CSI driver)  →  ecr + github-oidc (CI role) + rds (PostgreSQL) + K8s DB Secret
+#   →  3. alb-controller (Ingress → ALB)  →  4. argocd
 # install_addons = false: only vpc + eks + ecr + CI role + rds (IAM roles, OIDC provider, KMS key included).
-# Each module lives in ../modules. Change behaviour with variables (terraform.tfvars).
+# Each module lives in ../modules. Change behaviour with variables (../terraform-state-idea-board/<root>/terraform.tfvars, via tf.sh).
 # =============================================================================
 module "vpc" {
   source   = "../modules/aws/vpc"
@@ -36,15 +36,19 @@ module "github_oidc" {
   ecr_repository_arns = module.ecr.repository_arns
 }
 
-# Managed PostgreSQL + Secrets Manager credentials + backend IRSA role (read via Dapr).
+# Managed PostgreSQL; its connection details go into the K8s Secret backend-db.
 module "rds" {
-  source            = "../modules/aws/rds"
-  name              = var.name
-  vpc_id            = module.vpc.vpc_id
-  vpc_cidr          = var.vpc_cidr
-  subnet_ids        = module.vpc.private_subnet_ids
-  oidc_provider_arn = module.eks.oidc_provider_arn
-  oidc_provider     = module.eks.oidc_provider
+  source     = "../modules/aws/rds"
+  name       = var.name
+  vpc_id     = module.vpc.vpc_id
+  vpc_cidr   = var.vpc_cidr
+  subnet_ids = module.vpc.private_subnet_ids
+}
+
+module "app_db_secret" {
+  source     = "../modules/common/app-db-secret"
+  db         = module.rds.db
+  depends_on = [module.eks]
 }
 
 # CI verify-deploy logs in to EKS as kube group idea-board-ci (read-only RBAC in modules/common/argocd).
@@ -67,13 +71,6 @@ module "alb_controller" {
   depends_on = [module.eks]
 }
 
-module "dapr" {
-  source = "../modules/common/dapr"
-  count  = var.install_addons ? 1 : 0
-
-  depends_on = [module.eks]
-}
-
 module "argocd" {
   source          = "../modules/common/argocd"
   count           = var.install_addons ? 1 : 0
@@ -84,8 +81,8 @@ module "argocd" {
   app_path        = "kustomize-apps/overlays/aws"
   ci_rbac_subject = { kind = "Group", name = "idea-board-ci" }
 
-  # Dapr first: the app's secret store Component (a Dapr CRD) is synced by Argo CD.
-  depends_on = [module.alb_controller, module.dapr]
+  # Namespace + DB Secret first, so the backend's first pod finds them.
+  depends_on = [module.alb_controller, module.app_db_secret]
 }
 
 # Needs the ALB to exist first (created when Argo CD syncs the Ingress) → separate switch.

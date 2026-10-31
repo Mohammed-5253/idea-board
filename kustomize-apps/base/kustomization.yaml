@@ -12,6 +12,7 @@ resources:
   - namespace.yaml
   - serviceaccounts.yaml
   - configmap.yaml
+  - db-migrate-job.yaml
   - backend-deployment.yaml
   - backend-service.yaml
   - frontend-deployment.yaml

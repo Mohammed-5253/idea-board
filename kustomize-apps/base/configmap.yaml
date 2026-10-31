@@ -7,9 +7,6 @@ metadata:
 data:
   APP_ENV: base
   LOG_LEVEL: INFO
-  # dapr = fetch host, port, dbname, user, password and sslmode from the Dapr secret store
-  # (AWS Secrets Manager / GCP Secret Manager → RDS / Cloud SQL). Nothing DB-related here.
-  DB_CREDENTIALS_SOURCE: dapr
-  # Fallback only; the secret's own sslmode wins. Both RDS and Cloud SQL enforce TLS.
-  DB_SSLMODE: require
+  # DB_* (host, user, password, sslmode…) come from Secret backend-db / db-migrate (terraform).
+  DB_CREDENTIALS_SOURCE: env
   FAULT_INJECTION_RATE: "0"

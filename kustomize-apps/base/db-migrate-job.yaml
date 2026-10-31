@@ -1,0 +1,65 @@
+# =============================================================================
+# db-migrate Job – Argo CD PreSync hook: runs BEFORE every sync applies the Deployment.
+#   1. idea-board-db-bootstrap  as OWNER: create/refresh app role ideas_app (SELECT/INSERT)
+#   2. alembic upgrade head     as OWNER: create/update the ideas table (no-op when current)
+# Owner credentials live only in Secret db-migrate (terraform/modules/common/app-db-secret);
+# the backend pod gets Secret backend-db (app user) only. One Job per sync → migrations
+# never run concurrently, and backend restarts/scale-out don't touch the schema.
+# IF the Job fails THEN the sync fails and the old backend keeps running.
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: db-migrate
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: backend
+          imagePullPolicy: IfNotPresent
+          # Alembic reads DB_USER/DB_PASSWORD (core/secrets.py, env source) → point them at the owner.
+          command:
+            - sh
+            - -c
+            - >-
+              idea-board-db-bootstrap &&
+              DB_USER="$BOOTSTRAP_OWNER_USER" DB_PASSWORD="$BOOTSTRAP_OWNER_PASSWORD"
+              alembic upgrade head
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: db-migrate
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

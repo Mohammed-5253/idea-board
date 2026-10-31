@@ -5,8 +5,8 @@ or GCP (GKE). Infrastructure is Terraform, deployments are GitOps with Argo CD, 
 GitHub Actions with an AI assistant for reviews and failure analysis.
 
 The database is managed PostgreSQL: RDS on AWS, Cloud SQL on GCP (smallest instances).
-The backend never sees cloud-specific config. It reads its DB credentials from a Dapr
-sidecar, whose secret store points at AWS Secrets Manager or GCP Secret Manager.
+The backend never sees cloud-specific config. Terraform writes the DB connection details
+into the Kubernetes Secret `backend-db`, which the backend reads as env vars.
 
 ## How it fits together
 
@@ -19,7 +19,7 @@ Run workflow (pick aws / gcp / aws,gcp)
                                                    │
                          CI verify-deploy waits for Synced + Healthy, opens an issue if not
 
-backend pod ─► daprd sidecar ─► Secrets Manager / Secret Manager ─► RDS / Cloud SQL details
+backend pod ─► env from Secret backend-db (terraform) ─► RDS / Cloud SQL
 ```
 
 ## Repository layout
@@ -49,8 +49,8 @@ Infrastructure is created in two passes from `terraform/aws` or `terraform/gcp`
 (see [terraform/README.md](terraform/README.md) for the modules):
 
 1. `install_addons = false`: network, cluster, registry, the CI identity (OIDC / WIF) and
-   managed PostgreSQL with its secrets.
-2. `install_addons = true`: Dapr and Argo CD (plus the ALB controller on AWS). Argo CD then
+   managed PostgreSQL, plus the app namespace and its DB Secret.
+2. `install_addons = true`: Argo CD (plus the ALB controller on AWS). Argo CD then
    deploys the app from Git.
 
 Use the wrapper instead of plain `terraform`, so the PR infra check stays current:
@@ -60,8 +60,8 @@ terraform/tf.sh gcp plan
 terraform/tf.sh gcp apply     # also writes terraform/gcp/inventory.txt – commit it
 ```
 
-Terraform state is local and git-ignored. The Argo CD and Dapr charts live in
-`terraform/argo-cd`, `terraform/argocd-app` and `terraform/dapr`, so an apply never
+Terraform state is local and git-ignored. The Argo CD charts live in
+`terraform/argo-cd` and `terraform/argocd-app`, so an apply never
 downloads charts.
 
 Monthly budgets (about $25 per cloud, e-mail alerts only, no hard stop) are separate roots

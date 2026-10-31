@@ -32,29 +32,6 @@ module "eks" {
     coredns    = {}
   }
 
-  # Control plane → nodes for webhooks served by pods. The default rules cover 443/4443/
-  # 6443/8443/9443/10250 only; the Dapr sidecar injector listens on 4000 (and the operator's
-  # conversion webhook on 19443). Without this the injector webhook (failurePolicy Ignore)
-  # silently creates pods WITHOUT the Dapr sidecar.
-  node_security_group_additional_rules = {
-    dapr_webhooks = {
-      description                   = "Control plane to Dapr webhooks"
-      type                          = "ingress"
-      protocol                      = "tcp"
-      from_port                     = 4000
-      to_port                       = 4000
-      source_cluster_security_group = true
-    }
-    dapr_conversion = {
-      description                   = "Control plane to Dapr operator conversion webhook"
-      type                          = "ingress"
-      protocol                      = "tcp"
-      from_port                     = 19443
-      to_port                       = 19443
-      source_cluster_security_group = true
-    }
-  }
-
   eks_managed_node_groups = {
     default = {
       ami_type       = "AL2023_x86_64_STANDARD"

@@ -7,6 +7,11 @@
 # =============================================================================
 terraform {
   required_version = ">= 1.11.0, < 2.0.0"
+  # State lives OUTSIDE the repo: <repo parent>/terraform-state-idea-board/<root>/ with terraform.tfvars (path is
+  # relative to this folder; terraform -chdir / tf.sh keep it correct).
+  backend "local" {
+    path = "../../../../terraform-state-idea-board/budget-aws/terraform.tfstate"
+  }
   required_providers {
     aws = {
       source  = "hashicorp/aws"

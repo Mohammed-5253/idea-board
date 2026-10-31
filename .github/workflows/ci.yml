@@ -158,7 +158,7 @@ jobs:
               git cat-file -e "${src:-none}^{commit}" 2>/dev/null || src="$(git rev-list --max-parents=0 HEAD | tail -1)"
               echo "## Diff ($t: changes since deployed ${src::7})"
               git diff "$src" HEAD -- app kustomize-apps terraform ':!kustomize-apps/overlays/*/kustomization.yaml' ':!terraform/*/inventory.txt' \
-                ':!terraform/dapr' ':!terraform/argo-cd' | head -c 60000 # vendored charts = noise
+                ':!terraform/argo-cd' | head -c 60000 # vendored charts = noise
             done; } | python3 ci/ai/assist.py infra > infra.md
           cat infra.md >> "$GITHUB_STEP_SUMMARY"
           if grep -q 'COMPATIBLE: no' infra.md; then

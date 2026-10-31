@@ -33,8 +33,3 @@ output "app_url" {
 output "db_endpoint" {
   value = module.rds.endpoint
 }
-
-output "backend_role_arn" {
-  description = "IRSA role annotated on the backend ServiceAccount (kustomize-apps/overlays/aws/patch-serviceaccount.yaml)."
-  value       = module.rds.backend_role_arn
-}

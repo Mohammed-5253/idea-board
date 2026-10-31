@@ -1,18 +1,11 @@
 # =============================================================================
 # Backend Deployment (FastAPI)
-# CONFIG: env vars from ConfigMap `backend-config` (configmap.yaml). DB credentials come from
-#   the Dapr sidecar → secret store component (overlays/<cloud>/dapr-secretstore.yaml):
-#   AWS Secrets Manager / GCP Secret Manager, written by terraform (aws/rds, gcp/cloudsql).
-# DAPR: daprd runs as a NATIVE sidecar (terraform/modules/common/dapr): the injector appends
-#   it AFTER any init containers, so our init containers could never reach it. Hence the
-#   DB steps run in the backend container itself (all init containers incl. daprd have
-#   started by then). No init containers here.
-# STARTUP (command below, every pod start, both steps idempotent, then exec → uvicorn is PID 1):
-#   1. idea-board-db-bootstrap  create DB/app user (OWNER secret + app secret)
-#   2. alembic upgrade head     migrations as OWNER (DAPR_DB_SECRET_NAME=idea-board-db-owner)
-#   3. uvicorn                  the API (app secret idea-board-db-app, default)
-# PROBES: liveness /healthz (process only) · readiness /readyz (DB) · startup gives up to
-#   180 s for Dapr + bootstrap + migrations + DB pool creation.
+# CONFIG: env vars from ConfigMap `backend-config` (configmap.yaml) + Secret `backend-db`
+#   (DB_HOST/DB_USER/DB_PASSWORD…, written by terraform/modules/common/app-db-secret).
+#   App user only (SELECT/INSERT); schema + role are handled by the db-migrate Job
+#   (db-migrate-job.yaml, Argo CD PreSync) before this Deployment is updated.
+# STARTUP: the image CMD (uvicorn). PROBES: liveness /healthz (process only) · readiness
+#   /readyz (DB) · startup gives up to 180 s for DB pool creation.
 # SECURITY: matches PSA "restricted" + read-only root FS (/tmp is the only writable dir).
 # =============================================================================
 apiVersion: apps/v1
@@ -37,10 +30,6 @@ spec:
       labels:
         app.kubernetes.io/name: backend
       annotations:
-        dapr.io/enabled: "true"
-        dapr.io/app-id: backend
-        # Prometheus scrapes the app's /metrics; Dapr's own metrics are not needed.
-        dapr.io/enable-metrics: "false"
         # Prometheus (kubernetes-pods job) scrapes the app's /metrics – the health gate's data.
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
@@ -66,21 +55,14 @@ spec:
         - name: backend
           image: backend
           imagePullPolicy: IfNotPresent
-          # Same uvicorn flags as the Dockerfile CMD (keep both in sync).
-          command:
-            - sh
-            - -c
-            - >-
-              idea-board-db-bootstrap &&
-              DAPR_DB_SECRET_NAME=idea-board-db-owner alembic upgrade head &&
-              exec uvicorn idea_board.main:app --host 0.0.0.0 --port 8000
-              --proxy-headers --forwarded-allow-ips '*' --timeout-graceful-shutdown 20
           ports:
             - name: http
               containerPort: 8000
           envFrom:
             - configMapRef:
                 name: backend-config
+            - secretRef:
+                name: backend-db
           resources:
             requests:
               cpu: 100m

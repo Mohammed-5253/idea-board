@@ -3,26 +3,13 @@
 #   - cheapest setup: db-f1-micro (shared core, Enterprise edition), zonal, 10 GiB HDD,
 #     no backups, no public IP
 #   - private IP through Private Service Access (VPC peering with Google's service network)
-#   - two Secret Manager secrets (same model as AWS):
-#       <name>-db-owner  owner user: db-bootstrap + migrations
-#       <name>-db-app    app user (created by db-bootstrap): the running API
-#     Each is one JSON document {host, port, dbname, username, password, sslmode}, read
-#     by the backend through the Dapr secret store (secretstores.gcp.secretmanager).
-#   - Workload Identity: the backend KSA principal may read those two secrets (no GSA)
+#   - two users, output `db` → K8s Secrets (terraform/modules/common/app-db-secret):
+#       ideas_owner  db-migrate Job only (bootstrap + migrations)
+#       ideas_app    created by db-bootstrap: the running API (SELECT/INSERT only)
 # Passwords come from random_password and are kept in the (local, git-ignored) state.
 # =============================================================================
 locals {
   db_name = "ideas"
-  secrets = {
-    owner = { username = google_sql_user.owner.name, password = random_password.owner.result }
-    app   = { username = "ideas_app", password = random_password.app.result }
-  }
-  # GKE Workload Identity principal of the backend Kubernetes ServiceAccount.
-  backend_principal = "principal://iam.googleapis.com/projects/${data.google_project.this.number}/locations/global/workloadIdentityPools/${var.project_id}.svc.id.goog/subject/ns/${var.k8s_namespace}/sa/${var.k8s_service_account}"
-}
-
-data "google_project" "this" {
-  project_id = var.project_id
 }
 
 resource "random_password" "owner" {
@@ -96,32 +83,4 @@ resource "google_sql_user" "owner" {
   name     = "ideas_owner"
   instance = google_sql_database_instance.this.name
   password = random_password.owner.result
-}
-
-resource "google_secret_manager_secret" "db" {
-  for_each  = local.secrets
-  secret_id = "${var.name}-db-${each.key}"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "db" {
-  for_each = local.secrets
-  secret   = google_secret_manager_secret.db[each.key].id
-  secret_data = jsonencode({
-    host     = google_sql_database_instance.this.private_ip_address
-    port     = 5432
-    dbname   = local.db_name
-    username = each.value.username
-    password = each.value.password
-    sslmode  = "require"
-  })
-}
-
-resource "google_secret_manager_secret_iam_member" "backend" {
-  for_each  = local.secrets
-  secret_id = google_secret_manager_secret.db[each.key].id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = local.backend_principal
 }

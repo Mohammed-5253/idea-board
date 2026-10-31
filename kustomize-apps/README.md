@@ -9,22 +9,19 @@ kustomize-apps/
 │   ├── namespace.yaml           idea-board (Pod Security "restricted")
 │   ├── configmap.yaml           non-secret settings (no DB details)
 │   ├── serviceaccounts.yaml
-│   ├── backend-*.yaml           FastAPI Deployment + Service, Dapr sidecar: DB credentials
-│   │                            from the Dapr secret store (RDS / Cloud SQL, via terraform)
+│   ├── backend-*.yaml           FastAPI Deployment + Service; DB credentials from Secret
+│   │                            backend-db (written by terraform, not in Git)
 │   ├── frontend-*.yaml          nginx Deployment + Service
 │   └── ingress.yaml             /api → backend, / → frontend
 └── overlays/
-    ├── aws/                   ECR images, ALB ingress, dapr-secretstore.yaml → Secrets Manager,
-    │                          backend ServiceAccount annotated with the IRSA role
+    ├── aws/                   ECR images, ALB ingress
     └── gcp/                   Artifact Registry images, GKE ingress, static IP,
-                               ManagedCertificate (<ip>.sslip.io) + HTTPS redirect,
-                               dapr-secretstore.yaml → Secret Manager (Workload Identity)
+                               ManagedCertificate (<ip>.sslip.io) + HTTPS redirect
 ```
 
-No database runs in the cluster. On every start the backend container runs, in order:
-`idea-board-db-bootstrap` (creates the app DB user), `alembic upgrade head` (as the owner
-user), then uvicorn. These steps can't be init containers: Dapr's native sidecar starts
-after init containers, so they couldn't reach it.
+No database runs in the cluster. Before each sync, Argo CD runs the `db-migrate` Job
+(PreSync hook, owner user from Secret `db-migrate`): `idea-board-db-bootstrap` creates the
+app user, then `alembic upgrade head`. The backend only gets the app user (Secret `backend-db`).
 
 The `images:` tags in each overlay are written by CI (`deploy(<cloud>): images <tag>`
 commits). Don't edit them by hand except to roll back: set the previous tag and push,
