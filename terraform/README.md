@@ -1,12 +1,13 @@
 # terraform/
 
 Two roots (`aws/`, `gcp/`) that only wire modules together and set variables. All logic
-lives in `modules/`. Argo CD is installed from charts vendored in this folder, so an apply
-never downloads charts.
+lives in `modules/`. Argo CD and Dapr are installed from charts vendored in this folder,
+so an apply never downloads charts.
 
 ```
 terraform/
 ├── tf.sh                    wrapper: terraform + refresh <cloud>/inventory.txt
+├── budget/{aws,gcp}         monthly cost budgets ($25, e-mail alerts only), kept across app destroys
 ├── aws/                     root for AWS (ap-south-1)
 ├── gcp/                     root for GCP (asia-south1)
 ├── argo-cd/                 vendored upstream argo-cd chart 10.11.6 (Argo CD v3.5.6)
@@ -33,10 +34,17 @@ terraform/
 
 Each cloud is built in two passes:
 
-1. `install_addons = false`: network, cluster, registry, CI identity
-   managed PostgreSQL (RDS / Cloud SQL) and its secrets. GCP also creates the app's static IP.
+1. `install_addons = false`: network, cluster, registry, CI identity, managed PostgreSQL
+   (RDS / Cloud SQL) and its secrets. GCP also creates the app's static IP.
 2. `install_addons = true`: ALB controller (AWS only), Dapr and Argo CD. From then on, Argo CD
    deploys `kustomize-apps/overlays/<cloud>` from Git.
+3. AWS only: once Argo CD has created the app ALB, apply again with
+   `-var enable_cloudfront=true` for the HTTPS URL.
+
+The Dapr sidecar injector is a webhook on node port 4000 (operator: 19443). The control
+plane must reach it: the EKS node security group and a GKE firewall rule allow both ports.
+If it can't, pods start silently without the sidecar and the backend can't read its DB
+secrets.
 
 ```sh
 cd terraform/gcp && cp terraform.tfvars.example terraform.tfvars   # AWS: defaults in variables.tf
@@ -57,6 +65,19 @@ After the first apply, copy the CI outputs (`github_ci_role_arn`, `github_wif_pr
 Private repo: never put the Git token in a file. Export it instead:
 `export TF_VAR_git_username=<user> TF_VAR_git_token=<read-only token>`.
 
+## Budgets
+
+Apply once per cloud; they are not part of the app stacks and survive `destroy`.
+Alerts only: neither cloud can hard-cap spending, and billing data lags hours. E-mails go
+out at 50%, 80% and 100% of actual spend and at 100% forecast. AWS sends them to
+`alert_emails` (git-ignored tfvars), GCP to the billing account admins.
+
+```sh
+echo 'alert_emails = ["<you@example.com>"]' > terraform/budget/aws/terraform.tfvars
+terraform -chdir=terraform/budget/aws init && terraform -chdir=terraform/budget/aws apply
+terraform -chdir=terraform/budget/gcp init && terraform -chdir=terraform/budget/gcp apply   # ₹2100 (≈ $25): the billing account is in INR
+```
+
 ## State
 
 State is local (`<cloud>/terraform.tfstate`, git-ignored). A remote backend
@@ -65,8 +86,8 @@ State is local (`<cloud>/terraform.tfstate`, git-ignored). A remote backend
 ## Destroy
 
 - **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
-  the VPC delete. Cloud SQL is destroyed without backups (data is lost). Then run `terraform/tf.sh gcp destroy`. The Workload Identity pool ID
-  is soft-deleted for 30 days. Recreating it within that time needs
+  the VPC delete. Then run `terraform/tf.sh gcp destroy`. Cloud SQL is destroyed without
+  backups (data is lost). The Workload Identity pool ID is soft-deleted for 30 days. Recreating it within that time needs
   `gcloud iam workload-identity-pools undelete`.
 - **AWS:** run `terraform/tf.sh aws destroy`. If the ALB is already gone, add
   `-var enable_cloudfront=false -var install_addons=false`. Afterwards, check for an orphaned

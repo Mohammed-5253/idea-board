@@ -4,15 +4,22 @@ A small full-stack app (React + FastAPI + PostgreSQL) that runs on Kubernetes on
 or GCP (GKE). Infrastructure is Terraform, deployments are GitOps with Argo CD, and CI is
 GitHub Actions with an AI assistant for reviews and failure analysis.
 
+The database is managed PostgreSQL: RDS on AWS, Cloud SQL on GCP (smallest instances).
+The backend never sees cloud-specific config. It reads its DB credentials from a Dapr
+sidecar, whose secret store points at AWS Secrets Manager or GCP Secret Manager.
+
 ## How it fits together
 
 ```
-push to main ─► GitHub Actions: test → build image → push to ECR / Artifact Registry
+Run workflow (pick aws / gcp / aws,gcp)
+   └─► GitHub Actions: test → AI infra check → build → push to the picked registries
                                     └─► commit new tag to kustomize-apps/overlays/<cloud>
                                                    │
                          Argo CD (in the cluster) ◄┘ syncs the overlay → app rolls out
                                                    │
                          CI verify-deploy waits for Synced + Healthy, opens an issue if not
+
+backend pod ─► daprd sidecar ─► Secrets Manager / Secret Manager ─► RDS / Cloud SQL details
 ```
 
 ## Repository layout
@@ -41,8 +48,10 @@ docker compose down -v                          # stop and wipe the database
 Infrastructure is created in two passes from `terraform/aws` or `terraform/gcp`
 (see [terraform/README.md](terraform/README.md) for the modules):
 
-1. `install_addons = false`: network, cluster, registry and the CI identity (OIDC / WIF).
-2. `install_addons = true`: Argo CD, which then deploys the app from Git.
+1. `install_addons = false`: network, cluster, registry, the CI identity (OIDC / WIF) and
+   managed PostgreSQL with its secrets.
+2. `install_addons = true`: Dapr and Argo CD (plus the ALB controller on AWS). Argo CD then
+   deploys the app from Git.
 
 Use the wrapper instead of plain `terraform`, so the PR infra check stays current:
 
@@ -51,8 +60,12 @@ terraform/tf.sh gcp plan
 terraform/tf.sh gcp apply     # also writes terraform/gcp/inventory.txt – commit it
 ```
 
-Terraform state is local and git-ignored. The Argo CD charts live in `terraform/argo-cd`
-and `terraform/argocd-app`, so an apply never downloads charts.
+Terraform state is local and git-ignored. The Argo CD and Dapr charts live in
+`terraform/argo-cd`, `terraform/argocd-app` and `terraform/dapr`, so an apply never
+downloads charts.
+
+Monthly budgets (about $25 per cloud, e-mail alerts only, no hard stop) are separate roots
+in `terraform/budget/`.
 
 ## CI/CD
 
@@ -104,6 +117,8 @@ never fails the pipeline.
 
 - **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
   the VPC delete. Then run `terraform/tf.sh gcp destroy`.
-- **AWS:** run `terraform/tf.sh aws destroy`. Afterwards, check for an orphaned ALB,
-  security groups and the retained Postgres EBS volume. If the ALB is already gone, add
+- **AWS:** run `terraform/tf.sh aws destroy`. Afterwards, check for an orphaned ALB and
+  its security groups. If the ALB is already gone, add
   `-var enable_cloudfront=false -var install_addons=false`.
+- Both destroy the database without a backup, so its data is lost.
+- Budgets in `terraform/budget/` are not touched by these destroys.

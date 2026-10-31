@@ -6,6 +6,10 @@ module.alb_controller[0].aws_iam_role_policy_attachment.alb_controller
 module.alb_controller[0].helm_release.alb_controller
 module.argocd[0].helm_release.app
 module.argocd[0].helm_release.argocd
+module.cloudfront[0].data.aws_cloudfront_cache_policy.disabled
+module.cloudfront[0].data.aws_cloudfront_origin_request_policy.all_viewer
+module.cloudfront[0].data.aws_lb.app
+module.cloudfront[0].aws_cloudfront_distribution.app
 module.dapr[0].helm_release.dapr
 module.ecr.aws_ecr_lifecycle_policy.this["backend"]
 module.ecr.aws_ecr_lifecycle_policy.this["frontend"]
