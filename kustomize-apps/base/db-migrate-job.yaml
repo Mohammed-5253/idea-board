@@ -6,7 +6,19 @@
 # the backend pod gets Secret backend-db (app user) only. One Job per sync → migrations
 # never run concurrently, and backend restarts/scale-out don't touch the schema.
 # IF the Job fails THEN the sync fails and the old backend keeps running.
+# Its ServiceAccount is a PreSync hook too (wave -1): normal resources are applied only
+# AFTER PreSync, so a plain ServiceAccount would not exist yet when the Job starts.
 # =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-migrate
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+automountServiceAccountToken: false
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
