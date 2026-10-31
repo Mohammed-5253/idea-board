@@ -39,9 +39,12 @@ spec:
               idea-board-db-bootstrap &&
               DB_USER="$BOOTSTRAP_OWNER_USER" DB_PASSWORD="$BOOTSTRAP_OWNER_PASSWORD"
               alembic upgrade head
+          # No backend-config here: a PreSync hook runs BEFORE this sync updates the ConfigMap,
+          # so it would see the previous revision's values.
+          env:
+            - name: DB_CREDENTIALS_SOURCE
+              value: env
           envFrom:
-            - configMapRef:
-                name: backend-config
             - secretRef:
                 name: db-migrate
           resources:
