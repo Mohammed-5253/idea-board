@@ -92,4 +92,6 @@ module "cloudfront" {
   name         = var.name
   cluster_name = module.eks.cluster_name
   ingress      = "idea-board/idea-board" # kustomize-apps Ingress (namespace/name)
+  default_ttl  = var.cloudfront_default_ttl
+  max_ttl      = var.cloudfront_max_ttl
 }

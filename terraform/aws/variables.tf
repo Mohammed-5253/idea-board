@@ -103,3 +103,15 @@ variable "enable_cloudfront" {
   type        = bool
   default     = false
 }
+
+variable "cloudfront_default_ttl" {
+  description = "CloudFront TTL (seconds) for responses WITHOUT Cache-Control. /api/* is never cached."
+  type        = number
+  default     = 0
+}
+
+variable "cloudfront_max_ttl" {
+  description = "CloudFront max TTL (seconds): cap on the origin's max-age for static files."
+  type        = number
+  default     = 86400 # 1 day
+}
