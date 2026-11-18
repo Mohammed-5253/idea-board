@@ -25,12 +25,22 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # post comment + label
+      id-token: write # OIDC token → read-only state identity (same-repo PRs only, see `if`)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2 # PR merge commit + its base parent → `git diff HEAD^1` = the PR's changes
           persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_STATE_READER_ROLE_ARN }}
+          aws-region: ap-south-1
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_STATE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_STATE_SERVICE_ACCOUNT }}
       - name: AI review
+        shell: bash
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ vars.AI_BASE_URL }}
@@ -40,11 +50,14 @@ jobs:
         run: |
           git diff HEAD^1 HEAD > pr.diff
           python3 ci/ai/assist.py pr < pr.diff > review.md
-          # Infra compatibility: PR vs what exists in EVERY cloud's Terraform state
-          # (terraform/<cloud>/inventory.txt, refreshed by terraform/tf.sh) – the operator may
-          # release to any of them. Advisory here; ci.yml's infra-check enforces it per release.
+          # Infra compatibility: PR vs what exists in EVERY cloud's Terraform state (addresses
+          # only, read from the remote state by ci/state_list.sh) – the operator may release to
+          # any of them. Advisory here; ci.yml's infra-check enforces it per release.
+          set -o pipefail
           { for t in aws gcp; do
-              echo "## Inventory: $t"; cat "terraform/$t/inventory.txt" 2>/dev/null; echo
+              echo "## Terraform state: $t"
+              ci/state_list.sh "$t" || echo "(state of $t could not be read – judge it as unknown)"
+              echo
             done
             echo "## Diff"; cat pr.diff; } | python3 ci/ai/assist.py infra > infra.md
           { echo; cat infra.md; } >> review.md

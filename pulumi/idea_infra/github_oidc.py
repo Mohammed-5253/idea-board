@@ -1,4 +1,8 @@
-"""GitHub Actions OIDC provider + CI role (push to our ECR repos, describe our EKS cluster)."""
+"""CI role for GitHub Actions (push to our ECR repos, describe our EKS cluster).
+
+The account's GitHub OIDC provider belongs to terraform/bootstrap/aws (an account can't
+hold two), so it is looked up here, like data.aws_iam_openid_connect_provider in terraform/aws.
+"""
 
 import json
 
@@ -7,11 +11,9 @@ import pulumi_aws as aws
 
 
 def create_github_oidc(name: str, github_repo: str, ecr_repository_arns, opts) -> dict:
-    provider = aws.iam.OpenIdConnectProvider(
-        "github",
+    provider = aws.iam.get_open_id_connect_provider_output(
         url="https://token.actions.githubusercontent.com",
-        client_id_lists=["sts.amazonaws.com"],
-        opts=opts,
+        opts=pulumi.InvokeOutputOptions(provider=opts.provider),
     )
     role = aws.iam.Role(
         "ci",

@@ -7,10 +7,14 @@
 # =============================================================================
 terraform {
   required_version = ">= 1.11.0, < 2.0.0"
-  # State lives OUTSIDE the repo: <repo parent>/terraform-state-idea-board/<root>/ with terraform.tfvars (path is
-  # relative to this folder; terraform -chdir / tf.sh keep it correct).
-  backend "local" {
-    path = "../../../../terraform-state-idea-board/budget-aws/terraform.tfstate"
+  # Remote state in the bucket from terraform/bootstrap/aws (backend blocks can't use
+  # variables). S3-native lock file, no DynamoDB table.
+  backend "s3" {
+    bucket       = "idea-board-tfstate-326435482847"
+    key          = "terraform/budget-aws/terraform.tfstate"
+    region       = "ap-south-1"
+    encrypt      = true
+    use_lockfile = true
   }
   required_providers {
     aws = {

@@ -20,9 +20,10 @@ terraform {
     }
   }
 
-  # State lives OUTSIDE the repo: <repo parent>/terraform-state-idea-board/<root>/ with terraform.tfvars (path is
-  # relative to this folder; terraform -chdir / tf.sh keep it correct).
-  backend "local" {
-    path = "../../../terraform-state-idea-board/gcp/terraform.tfstate"
+  # Remote state in the bucket from terraform/bootstrap/gcp (backend blocks can't use
+  # variables). GCS locks the state itself.
+  backend "gcs" {
+    bucket = "idea-board-tfstate-7e93dfd0"
+    prefix = "terraform/gcp"
   }
 }

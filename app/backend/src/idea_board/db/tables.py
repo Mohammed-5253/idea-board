@@ -30,9 +30,12 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKey,
     Identity,
+    Integer,
     Index,
     MetaData,
+    PrimaryKeyConstraint,
     Table,
     Text,
     func,
@@ -68,4 +71,16 @@ ideas = Table(
     ),
     # Matches ORDER BY created_at DESC, id DESC in repository.list_ideas().
     Index("ix_ideas_created_at_id", "created_at", "id"),
+)
+
+# One row per successful edit (migration 0002). An idea's version is 1 + its revision count;
+# the primary key lets only one of two concurrent edits from the same version win.
+idea_revisions = Table(
+    "idea_revisions",
+    metadata,
+    Column("idea_id", BigInteger, ForeignKey("ideas.id", ondelete="CASCADE"), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("previous_content", Text, nullable=False),
+    Column("edited_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    PrimaryKeyConstraint("idea_id", "version"),
 )

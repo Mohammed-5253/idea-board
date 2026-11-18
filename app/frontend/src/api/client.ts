@@ -1,7 +1,8 @@
 /**
  * Minimal API client built on the browser's native `fetch` (no HTTP library dependency).
  *
- * WHAT: listIdeas() and createIdea() – the two spec endpoints – plus a typed ApiError.
+ * WHAT: listIdeas() and createIdea() – the two spec endpoints – getIdea()/editIdea() for
+ *       optimistic-concurrency edits (ETag / If-Match), plus a typed ApiError.
  * WHY fetch?  It's built into every browser and into Node 24 (tests); adding axios would be
  *       an unapproved dependency for two calls.
  * TIMEOUTS: every request is aborted after 10 s (AbortController). IF the backend hangs
@@ -37,6 +38,13 @@ function isApiErrorBody(value: unknown): value is ApiErrorBody {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await requestWithHeaders<T>(path, init)).body;
+}
+
+async function requestWithHeaders<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ body: T; headers: Headers }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response: Response;
@@ -62,7 +70,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, "http_error", `Request failed (${response.status}).`);
   }
-  return body as T;
+  return { body: body as T, headers: response.headers };
 }
 
 export function listIdeas(): Promise<Idea[]> {
@@ -75,4 +83,25 @@ export function createIdea(idea: NewIdea): Promise<Idea> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(idea),
   });
+}
+
+/** An idea plus its ETag (current version), needed to edit it. */
+export interface VersionedIdea {
+  idea: Idea;
+  etag: string;
+}
+
+export async function getIdea(id: number): Promise<VersionedIdea> {
+  const { body, headers } = await requestWithHeaders<Idea>(`/api/ideas/${id}`);
+  return { idea: body, etag: headers.get("ETag") ?? "" };
+}
+
+/** PATCH with If-Match: rejects with ApiError status 412 when someone else edited it first. */
+export async function editIdea(id: number, content: string, etag: string): Promise<VersionedIdea> {
+  const { body, headers } = await requestWithHeaders<Idea>(`/api/ideas/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "If-Match": etag },
+    body: JSON.stringify({ content }),
+  });
+  return { idea: body, etag: headers.get("ETag") ?? "" };
 }

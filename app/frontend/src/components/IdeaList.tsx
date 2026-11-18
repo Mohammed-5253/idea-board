@@ -8,13 +8,20 @@
  */
 import styles from "../App.module.css";
 import type { Idea } from "../api/types";
+import { IdeaEditor } from "./IdeaEditor";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
 });
 
-export function IdeaList({ ideas }: { ideas: Idea[] }) {
+export function IdeaList({
+  ideas,
+  onEdited,
+}: {
+  ideas: Idea[];
+  onEdited: (idea: Idea) => void;
+}) {
   return (
     <ul className={styles.list}>
       {ideas.map((idea) => (
@@ -23,6 +30,7 @@ export function IdeaList({ ideas }: { ideas: Idea[] }) {
           <time dateTime={idea.created_at} className={styles.muted}>
             {dateFormatter.format(new Date(idea.created_at))}
           </time>
+          <IdeaEditor id={idea.id} onEdited={onEdited} />
         </li>
       ))}
     </ul>

@@ -61,16 +61,19 @@ Infrastructure is created in two passes from `terraform/aws` or `terraform/gcp`
 2. `install_addons = true`: Argo CD (plus the ALB controller on AWS). Argo CD then
    deploys the app from Git.
 
-Use the wrapper instead of plain `terraform`, so the PR infra check stays current:
+State is remote: S3 for the AWS roots and Pulumi, GCS for the GCP roots. Apply the cloud's
+`terraform/bootstrap/<cloud>` root once from your laptop first; it creates the state bucket
+and the read-only identity CI uses to read it. Then move existing state with
+`terraform -chdir=terraform/<root> init -migrate-state` (details in
+[terraform/README.md](terraform/README.md#state-and-tfvars)).
 
 ```sh
-terraform/tf.sh gcp plan
-terraform/tf.sh gcp apply     # also writes terraform/gcp/inventory.txt – commit it
+terraform -chdir=terraform/gcp init
+terraform -chdir=terraform/gcp apply -var-file=../../../terraform-state-idea-board/gcp/terraform.tfvars
 ```
 
-State and tfvars live outside the repo, in `../terraform-state-idea-board/<root>/`
-(`aws`, `gcp`, `budget-aws`, `budget-gcp`). `tf.sh` loads that folder's `terraform.tfvars`;
-plain `terraform plan/apply` would not. Only `inventory.txt` stays in the repo, for CI.
+tfvars stay outside the repo, in `../terraform-state-idea-board/<root>/terraform.tfvars`;
+pass them with `-var-file`.
 The Argo CD charts live in `terraform/argo-cd` and `terraform/argocd-app`, so an apply
 never downloads charts.
 
@@ -92,10 +95,11 @@ Image tags look like `1.1.2-19b5615-12` (`version-commit-run`). Registries are i
 so re-running a job skips images that already exist.
 
 PR labels: `needs-review` (AI risk 4–5) and `infra-mismatch` (the PR needs infrastructure
-that is not in `terraform/aws/inventory.txt` or `terraform/gcp/inventory.txt`). Both are
+that is not in the AWS or GCP Terraform state). CI reads each state from its bucket with the
+read-only state identity and gives the AI only the resource addresses (`ci/state_addresses.py`),
+never attribute values. Both are
 advisory and never block a merge. At release time the same check runs only for the picked
 clouds, against the changes since each cloud's last deploy, and does block.
-Keep each `inventory.txt` current: run terraform through `terraform/tf.sh` and commit it.
 
 ## Configuration
 
@@ -112,6 +116,9 @@ picked per release in the Run workflow form, not in a variable.
 | `GCP_WIF_PROVIDER` | Terraform output `github_wif_provider` |
 | `GCP_CI_SERVICE_ACCOUNT` | Terraform output `github_ci_service_account` |
 | `GKE_CLUSTER`, `GKE_LOCATION` | `idea-board`, `asia-south1-a` |
+| `AWS_STATE_READER_ROLE_ARN` | `terraform/bootstrap/aws` output `state_reader_role_arn` |
+| `GCP_STATE_WIF_PROVIDER` | `terraform/bootstrap/gcp` output `state_reader_wif_provider` |
+| `GCP_STATE_SERVICE_ACCOUNT` | `terraform/bootstrap/gcp` output `state_reader_service_account` |
 | `AI_BASE_URL`, `AI_MODEL` | Any OpenAI-compatible API. Empty means OpenRouter, `openrouter/free`. |
 
 Secret: `AI_API_KEY`. No cloud keys are stored in GitHub: CI logs in through OIDC
@@ -120,15 +127,15 @@ never fails the pipeline.
 
 ## Switching clouds
 
-1. `terraform/tf.sh <cloud> apply` (both passes) and commit the inventory.
+1. Apply `terraform/<cloud>` (both passes); its bootstrap root must already exist.
 2. Run the `ci` workflow and pick the new cloud. The first run fills the empty registry.
 
 ## Tearing down
 
 - **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
-  the VPC delete. Then run `terraform/tf.sh gcp destroy`.
-- **AWS:** run `terraform/tf.sh aws destroy`. Afterwards, check for an orphaned ALB and
+  the VPC delete. Then run `terraform -chdir=terraform/gcp destroy -var-file=…`.
+- **AWS:** run `terraform -chdir=terraform/aws destroy -var-file=…`. Afterwards, check for an orphaned ALB and
   its security groups. If the ALB is already gone, add
   `-var enable_cloudfront=false -var install_addons=false`.
 - Both destroy the database without a backup, so its data is lost.
-- Budgets in `terraform/budget/` are not touched by these destroys.
+- Budgets in `terraform/budget/` and the bootstrap roots are not touched by these destroys.

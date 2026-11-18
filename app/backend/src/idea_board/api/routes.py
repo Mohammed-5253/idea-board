@@ -28,12 +28,12 @@ from __future__ import annotations
 import random
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import Engine
 
 from idea_board.api.errors import FaultInjectedError, error_response
-from idea_board.api.schemas import ErrorResponse, IdeaCreate, IdeaOut
+from idea_board.api.schemas import ErrorResponse, IdeaCreate, IdeaEdit, IdeaOut
 from idea_board.core import metrics
 from idea_board.core.logging import get_logger
 from idea_board.db import repository
@@ -89,10 +89,75 @@ def list_ideas(engine: EngineDep) -> list[IdeaOut]:
     responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     dependencies=[FaultDep],
 )
-def create_idea(payload: IdeaCreate, engine: EngineDep) -> IdeaOut:
+def create_idea(payload: IdeaCreate, engine: EngineDep, response: Response) -> IdeaOut:
     row = repository.create_idea(engine, payload.content)
+    response.headers["ETag"] = _etag(1)  # a new idea starts at version 1
     # Log the fact, not the content (privacy: idea text is user data).
     log.info("idea_created", idea_id=row["id"], content_length=len(row["content"]))
+    return IdeaOut(**row)
+
+
+def _etag(version: int) -> str:
+    return f'"{version}"'
+
+
+def _parse_etag(value: str) -> int | None:
+    """Version from an exact ETag ("3"); anything else can never match (→ 412)."""
+    inner = value[1:-1] if len(value) >= 3 and value[0] == value[-1] == '"' else ""
+    return int(inner) if inner.isascii() and inner.isdigit() else None
+
+
+@router.get(
+    "/api/ideas/{idea_id}",
+    response_model=IdeaOut,
+    summary="Get one idea (ETag = its version)",
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    dependencies=[FaultDep],
+)
+def get_idea(idea_id: int, engine: EngineDep, response: Response) -> IdeaOut:
+    found = repository.get_idea(engine, idea_id)
+    if found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    row, version = found
+    response.headers["ETag"] = _etag(version)
+    return IdeaOut(**row)
+
+
+@router.patch(
+    "/api/ideas/{idea_id}",
+    response_model=IdeaOut,
+    summary="Edit an idea's content (optimistic concurrency: If-Match = its ETag)",
+    responses={
+        404: {"model": ErrorResponse},
+        412: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        428: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+    dependencies=[FaultDep],
+)
+def edit_idea(
+    idea_id: int,
+    payload: IdeaEdit,
+    engine: EngineDep,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+) -> IdeaOut:
+    if if_match is None:
+        # 404 wins over 428: say "no such idea" before asking for a precondition.
+        if repository.get_idea(engine, idea_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        raise HTTPException(status.HTTP_428_PRECONDITION_REQUIRED)
+    try:
+        row, version = repository.edit_idea(
+            engine, idea_id, payload.content, _parse_etag(if_match.strip())
+        )
+    except repository.IdeaNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND) from None
+    except repository.VersionMismatch:
+        raise HTTPException(status.HTTP_412_PRECONDITION_FAILED) from None
+    log.info("idea_edited", idea_id=idea_id, version=version, content_length=len(row["content"]))
+    response.headers["ETag"] = _etag(version)
     return IdeaOut(**row)
 
 

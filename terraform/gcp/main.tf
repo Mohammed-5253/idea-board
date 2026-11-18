@@ -3,7 +3,7 @@
 #   1. vpc  →  2. gke  →  artifact-registry + github-wif (CI) + static IP + cloudsql  →  3. argocd
 # install_addons = false: everything except Argo CD (step 1, like AWS).
 # (Ingress needs no extra controller on GKE: the built-in one creates a Google LB.)
-# Each module lives in ../modules. Change behaviour with variables (../terraform-state-idea-board/<root>/terraform.tfvars, via tf.sh).
+# Each module lives in ../modules. Change behaviour with variables (../terraform-state-idea-board/<root>/terraform.tfvars, passed with -var-file).
 # =============================================================================
 
 # APIs this stack needs (enabling an already-enabled API is a no-op).

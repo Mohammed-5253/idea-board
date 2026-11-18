@@ -105,6 +105,11 @@ def ensure_database(owner: DbCredentials, maintenance_db: str = "postgres") -> b
         return True
 
 
+def _table_exists(conn: psycopg.Connection, table: str) -> bool:
+    found = conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()
+    return found is not None and found[0] is not None
+
+
 def bootstrap(owner: DbCredentials, app: DbCredentials) -> None:
     """Run the idempotent role/grant SQL as the owner (the target database must exist)."""
     conninfo = _conninfo(owner, owner.dbname)
@@ -131,10 +136,15 @@ def bootstrap(owner: DbCredentials, app: DbCredentials) -> None:
                 "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES TO {}"
             ).format(role)
         )
-        # IF the ideas table already exists (re-run after migrations) THEN grant directly too.
-        table_exists = conn.execute("SELECT to_regclass('public.ideas')").fetchone()
-        if table_exists and table_exists[0] is not None:
+        # IF a table already exists (re-run after migrations) THEN grant directly too.
+        # Edits change ideas.content only; idea_revisions is insert-only history.
+        if _table_exists(conn, "ideas"):
             conn.execute(sql.SQL("GRANT SELECT, INSERT ON public.ideas TO {}").format(role))
+            conn.execute(sql.SQL("GRANT UPDATE (content) ON public.ideas TO {}").format(role))
+        if _table_exists(conn, "idea_revisions"):
+            conn.execute(
+                sql.SQL("GRANT SELECT, INSERT ON public.idea_revisions TO {}").format(role)
+            )
         log.info("app_role_grants_applied", role=app.user, database=owner.dbname)
 
 

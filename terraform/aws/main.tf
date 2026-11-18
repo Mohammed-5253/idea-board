@@ -3,7 +3,7 @@
 #   1. vpc  →  2. eks (+ EBS CSI driver)  →  ecr + github-oidc (CI role) + rds (PostgreSQL) + K8s DB Secret
 #   →  3. alb-controller (Ingress → ALB)  →  4. argocd
 # install_addons = false: only vpc + eks + ecr + CI role + rds (IAM roles, OIDC provider, KMS key included).
-# Each module lives in ../modules. Change behaviour with variables (../terraform-state-idea-board/<root>/terraform.tfvars, via tf.sh).
+# Each module lives in ../modules. Change behaviour with variables (../terraform-state-idea-board/<root>/terraform.tfvars, passed with -var-file).
 # =============================================================================
 module "vpc" {
   source   = "../modules/aws/vpc"

@@ -86,7 +86,7 @@ def pg_engine(pg_container: DbCredentials, test_settings: Settings) -> Iterator[
 @pytest.fixture
 def clean_db(pg_engine: Engine) -> Engine:
     with pg_engine.begin() as conn:
-        conn.execute(text("TRUNCATE ideas RESTART IDENTITY"))
+        conn.execute(text("TRUNCATE ideas, idea_revisions RESTART IDENTITY"))
     return pg_engine
 
 

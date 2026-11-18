@@ -1,3 +1,0 @@
-data.google_project.this
-google_billing_budget.monthly
-google_project_service.budgets

@@ -1,0 +1,3 @@
+# Stack secrets (DB passwords) are encrypted with the KMS key from terraform/bootstrap/aws.
+# Create the stack once: pulumi stack init prod --secrets-provider "awskms://alias/idea-board-pulumi?region=ap-south-1"
+secretsprovider: awskms://alias/idea-board-pulumi?region=ap-south-1

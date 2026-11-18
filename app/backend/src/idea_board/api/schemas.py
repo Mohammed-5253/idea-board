@@ -44,6 +44,16 @@ class IdeaCreate(BaseModel):
     )
 
 
+class IdeaEdit(BaseModel):
+    """Request body for PATCH /api/ideas/{id} - validated exactly like IdeaCreate."""
+
+    model_config = ConfigDict(extra="ignore")
+    content: IdeaContent = Field(
+        description="The new idea text (trimmed, 1-500 characters).",
+        examples=["My edited idea"],
+    )
+
+
 class IdeaOut(BaseModel):
     """One idea in responses - exactly the table's three columns, nothing more."""
 

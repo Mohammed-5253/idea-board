@@ -6,7 +6,7 @@ so an apply never downloads charts.
 
 ```
 terraform/
-├── tf.sh                    wrapper: external tfvars + terraform + refresh <cloud>/inventory.txt
+├── bootstrap/{aws,gcp}      state buckets + read-only CI state identity, applied once from a laptop
 ├── budget/{aws,gcp}         monthly cost budgets ($25, e-mail alerts only), kept across app destroys
 ├── aws/                     root for AWS (ap-south-1)
 ├── gcp/                     root for GCP (asia-south1)
@@ -40,18 +40,18 @@ Each cloud is built in two passes:
 3. AWS only: once Argo CD has created the app ALB, apply again with
    `-var enable_cloudfront=true` for the HTTPS URL.
 
+Apply the cloud's bootstrap root first (see [State](#state-and-tfvars)).
+
 ```sh
-# tfvars + state live outside the repo: ../terraform-state-idea-board/<root>/ (see tf.sh)
+# tfvars live outside the repo: ../terraform-state-idea-board/<root>/terraform.tfvars
 cp ../terraform-state-idea-board/gcp/terraform.tfvars.example ../terraform-state-idea-board/gcp/terraform.tfvars
 terraform -chdir=terraform/gcp init
-terraform/tf.sh gcp plan
-terraform/tf.sh gcp apply
+terraform -chdir=terraform/gcp plan  -var-file=../../../terraform-state-idea-board/gcp/terraform.tfvars
+terraform -chdir=terraform/gcp apply -var-file=../../../terraform-state-idea-board/gcp/terraform.tfvars
 ```
 
-`tf.sh` runs the terraform command, then writes `terraform state list` to
-`<cloud>/inventory.txt`. That file holds resource addresses only, never attribute values,
-so it contains no secrets. The PR infra-compatibility check in CI reads it, so commit it after every
-apply or destroy. If you ran plain `terraform`, refresh it with `terraform/tf.sh <cloud> plan`.
+CI reads the resource list straight from the remote state (addresses only, see
+`ci/state_addresses.py`), so nothing has to be committed after an apply or destroy.
 
 After the first apply, copy the CI outputs (`github_ci_role_arn`, `github_wif_provider`,
 `github_ci_service_account`) into the GitHub repository variables listed in the
@@ -69,36 +69,52 @@ out at 50%, 80% and 100% of actual spend and at 100% forecast. AWS sends them to
 
 ```sh
 echo 'alert_emails = ["<you@example.com>"]' > ../terraform-state-idea-board/budget-aws/terraform.tfvars
-terraform -chdir=terraform/budget/aws init && terraform/tf.sh budget/aws apply
-terraform -chdir=terraform/budget/gcp init && terraform/tf.sh budget/gcp apply   # ₹2100 (≈ $25): the billing account is in INR
+terraform -chdir=terraform/budget/aws init && terraform -chdir=terraform/budget/aws apply -var-file=../../../../terraform-state-idea-board/budget-aws/terraform.tfvars
+terraform -chdir=terraform/budget/gcp init && terraform -chdir=terraform/budget/gcp apply   # ₹2100 (≈ $25): the billing account is in INR
 ```
 
 ## State and tfvars
 
-Both live outside the repo, next to it:
+State is remote and versioned; only the two bootstrap roots keep local state:
 
-```
-../terraform-state-idea-board/
-├── aws/         terraform.tfstate, terraform.tfvars
-├── gcp/         terraform.tfstate, terraform.tfvars, terraform.tfvars.example
-├── budget-aws/  terraform.tfstate, terraform.tfvars
-└── budget-gcp/  terraform.tfstate
-```
+| Root | State |
+|------|-------|
+| `bootstrap/aws`, `bootstrap/gcp` | local: `../terraform-state-idea-board/bootstrap-{aws,gcp}/terraform.tfstate` |
+| `aws` | `s3://idea-board-tfstate-326435482847/terraform/aws/terraform.tfstate` (S3 lock file) |
+| `budget/aws` | `s3://idea-board-tfstate-326435482847/terraform/budget-aws/terraform.tfstate` |
+| `gcp` | `gs://idea-board-tfstate-7e93dfd0/terraform/gcp/default.tfstate` |
+| `budget/gcp` | `gs://idea-board-tfstate-7e93dfd0/terraform/budget-gcp/default.tfstate` |
+| `pulumi/` | `s3://idea-board-tfstate-326435482847/pulumi`, secrets in KMS `alias/idea-board-pulumi` |
 
-Each root's `backend "local"` path points there (relative, so the repo and that folder
-must stay siblings). Terraform only auto-loads `terraform.tfvars` from the root folder,
-so run plan/apply/destroy/import through `tf.sh`, which passes it as `-var-file`. The
-state holds the DB passwords: keep the folder private and back it up. A remote backend
-(S3 / GCS) can replace it later in `versions.tf`.
+Order, once per cloud:
+
+1. Bootstrap: `terraform -chdir=terraform/bootstrap/aws init && terraform -chdir=terraform/bootstrap/aws apply`
+   (GCP: `terraform -chdir=terraform/bootstrap/gcp apply -var project_id=<project>`). It creates the state bucket
+   (versioned, encrypted, never public, `prevent_destroy`), the Pulumi KMS key, the account's GitHub OIDC
+   provider (AWS) and the read-only `idea-board-state-reader` identity CI uses. Its local state is small and has no secrets.
+2. Move each existing root's local state into the bucket: `terraform -chdir=terraform/<root> init -migrate-state`
+   (answer `yes`), then delete the old `terraform.tfstate*` files in `../terraform-state-idea-board/<root>/`.
+   On AWS, the OIDC provider used to belong to `terraform/aws`: before its next plan, run
+   `terraform -chdir=terraform/aws state rm module.github_oidc.aws_iam_openid_connect_provider.github` and
+   `terraform -chdir=terraform/bootstrap/aws import aws_iam_openid_connect_provider.github <provider arn>`
+   (or apply bootstrap before the first apply of terraform/aws).
+3. Set the repository variables `AWS_STATE_READER_ROLE_ARN`, `GCP_STATE_WIF_PROVIDER` and
+   `GCP_STATE_SERVICE_ACCOUNT` from the bootstrap outputs.
+
+Terraform only auto-loads `terraform.tfvars` from the root folder, so pass the external one with
+`-var-file`. The S3 backend uses your normal AWS credentials (`export AWS_PROFILE=mkk`), the GCS
+backend your `gcloud auth application-default login`. The state holds the DB passwords: only the
+operator and the read-only CI identity can read the buckets.
 
 ## Destroy
 
 - **GCP:** `kubectl delete ns idea-board` first. The load balancer's NEGs otherwise block
   the VPC delete (terraform then just forgets the already-deleted namespace and Secrets).
-  Then run `terraform/tf.sh gcp destroy`. Cloud SQL is destroyed without
+  Then run `terraform -chdir=terraform/gcp destroy -var-file=…`. Cloud SQL is destroyed without
   backups (data is lost). The Workload Identity pool ID is soft-deleted for 30 days. Recreating it within that time needs
   `gcloud iam workload-identity-pools undelete`.
-- **AWS:** run `terraform/tf.sh aws destroy`. If the ALB is already gone, add
+- The bootstrap roots are never destroyed with the app (`prevent_destroy` on the buckets).
+- **AWS:** run `terraform -chdir=terraform/aws destroy -var-file=…`. If the ALB is already gone, add
   `-var enable_cloudfront=false -var install_addons=false`. Afterwards, check for an orphaned
   `k8s-ideaboar-…` ALB, its security groups and target groups. RDS is destroyed without a
   final snapshot (data is lost).

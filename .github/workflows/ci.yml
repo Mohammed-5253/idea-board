@@ -4,7 +4,7 @@
 # Pull request : tests only (nothing is pushed).
 # Push to main : tests only (nothing is pushed).
 # Run workflow : the OPERATOR picks the cloud(s) (aws, gcp or aws,gcp) →
-#                tests + AI infra check (selected clouds' terraform inventory vs changes since
+#                tests + AI infra check (selected clouds' terraform state addresses vs changes since
 #                their last deploy; COMPATIBLE: no stops the release) → build both images ONCE →
 #                push to the selected clouds' registries only → ONE commit with the new tag in
 #                kustomize-apps/overlays/<selected cloud> → Argo CD deploys → verify-deploy waits
@@ -19,6 +19,8 @@
 #                  GCP_REGISTRY     <region>-docker.pkg.dev/<project>/idea-board
 #                  GCP_WIF_PROVIDER, GCP_CI_SERVICE_ACCOUNT  terraform/modules/gcp/github-wif outputs
 #                  EKS_CLUSTER, GKE_CLUSTER, GKE_LOCATION  verify-deploy reads Argo CD there
+#                  AWS_STATE_READER_ROLE_ARN  terraform/bootstrap/aws output (read-only state)
+#                  GCP_STATE_WIF_PROVIDER, GCP_STATE_SERVICE_ACCOUNT  terraform/bootstrap/gcp outputs
 #                Login is OIDC/WIF only. NO cloud keys are stored in GitHub.
 # SECURITY     : every action pinned to a commit SHA; each job gets only the permissions
 #                it needs.
@@ -126,8 +128,9 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # AI infra check for the SELECTED clouds: does the code being released need cloud
-  # resources their Terraform state does not have? Evidence per cloud: its inventory
-  # (terraform/<cloud>/inventory.txt, refreshed by terraform/tf.sh) + the diff since the
+  # resources their Terraform state does not have? Evidence per cloud: the resource
+  # addresses in its remote state (read-only state identity; ci/state_addresses.py drops
+  # every attribute value, so no secret reaches the AI or the log) + the diff since the
   # source commit of its last deploy(…) commit. `COMPATIBLE: no` stops the release.
   infra-check:
     name: ai · infra check (${{ needs.version.outputs.targets }})
@@ -137,6 +140,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      id-token: write # OIDC token → read-only state identity
     env:
       DEPLOY_TARGETS: ${{ needs.version.outputs.targets }}
     steps:
@@ -144,25 +148,38 @@ jobs:
         with:
           fetch-depth: 0 # history → find each cloud's last deployed source commit
           persist-credentials: false
-      - env:
+      - if: contains(needs.version.outputs.targets, 'aws')
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_STATE_READER_ROLE_ARN }}
+          aws-region: ap-south-1
+      - if: contains(needs.version.outputs.targets, 'gcp')
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_STATE_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_STATE_SERVICE_ACCOUNT }}
+      - shell: bash
+        env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ vars.AI_BASE_URL }}
           AI_MODEL: ${{ vars.AI_MODEL }}
         run: |
+          set -o pipefail
           { for t in ${DEPLOY_TARGETS//,/ }; do
-              echo "## Inventory: $t"; cat "terraform/$t/inventory.txt" 2>/dev/null; echo
+              echo "## Terraform state: $t"; ci/state_list.sh "$t"; echo
             done
             for t in ${DEPLOY_TARGETS//,/ }; do
               # deploy(<clouds>) commits carry "Source commit: <sha>" (update-manifests below).
               src="$(git log -1 --grep='^deploy(' --format=%B -- "kustomize-apps/overlays/$t" | sed -n 's/^Source commit: //p')"
               git cat-file -e "${src:-none}^{commit}" 2>/dev/null || src="$(git rev-list --max-parents=0 HEAD | tail -1)"
               echo "## Diff ($t: changes since deployed ${src::7})"
-              git diff "$src" HEAD -- app kustomize-apps terraform ':!kustomize-apps/overlays/*/kustomization.yaml' ':!terraform/*/inventory.txt' \
-                ':!terraform/argo-cd' | head -c 60000 # vendored charts = noise
+              # || true: head closing the pipe early (SIGPIPE) is expected under pipefail.
+              { git diff "$src" HEAD -- app kustomize-apps terraform ':!kustomize-apps/overlays/*/kustomization.yaml' \
+                ':!terraform/argo-cd' || true; } | head -c 60000 # vendored charts = noise
             done; } | python3 ci/ai/assist.py infra > infra.md
           cat infra.md >> "$GITHUB_STEP_SUMMARY"
           if grep -q 'COMPATIBLE: no' infra.md; then
-            echo "::error::AI infra check: $DEPLOY_TARGETS is missing infrastructure this release needs (see summary). Run terraform/tf.sh <cloud> apply, commit inventory.txt, then retry."
+            echo "::error::AI infra check: $DEPLOY_TARGETS is missing infrastructure this release needs (see summary). Apply terraform/<cloud>, then retry."
             exit 1
           fi
 

@@ -14,6 +14,7 @@ from pulumi.runtime.stack import wait_for_rpcs
 from pulumi.runtime.sync_await import _sync_await
 
 seen = []
+calls = []
 
 class Mocks(pulumi.runtime.Mocks):
     def new_resource(self, args):
@@ -28,6 +29,10 @@ class Mocks(pulumi.runtime.Mocks):
     def call(self, args):
         if args.token.endswith("getAvailabilityZones"):
             return {"names": ["a-1a", "a-1b", "a-1c"]}
+        if args.token == "aws:iam/getOpenIdConnectProvider:getOpenIdConnectProvider":
+            calls.append({"token": args.token, "args": dict(args.args)})
+            return {"arn": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
+                    "url": args.args.get("url")}
         return {"id": "x", "dnsName": "alb.example"}
 
 pulumi.runtime.set_mocks(Mocks(), project="idea-board-aws", stack="test", preview=False)
@@ -38,7 +43,7 @@ try:
     _sync_await(wait_for_rpcs())
 except Exception as exc:
     error = str(exc)
-print(json.dumps({"resources": seen, "error": error}, default=str))
+print(json.dumps({"resources": seen, "calls": calls, "error": error}, default=str))
 '''
 
 
@@ -83,6 +88,11 @@ def test_ecr_oidc_rds_secrets():
     (role,) = of(r, "aws:iam/role:Role")
     cond = json.loads(role["assumeRolePolicy"])["Statement"][0]["Condition"]["StringEquals"]
     assert cond["token.actions.githubusercontent.com:sub"].endswith(":ref:refs/heads/main")
+    # The OIDC provider belongs to terraform/bootstrap/aws: looked up, never created.
+    assert not of(r, "aws:iam/openIdConnectProvider:OpenIdConnectProvider")
+    assert [c["args"]["url"] for c in r["calls"]] == ["https://token.actions.githubusercontent.com"]
+    principal = json.loads(role["assumeRolePolicy"])["Statement"][0]["Principal"]["Federated"]
+    assert principal == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     (db,) = of(r, "aws:rds/instance:Instance")
     assert db["engineVersion"] == "17" and db["username"] == "ideas_owner"
     secrets = {s["metadata"]["name"]: s["stringData"] for s in of(r, "kubernetes:core/v1:Secret")}
@@ -97,3 +107,10 @@ def test_cloudfront_toggle_and_validation():
     assert dist["orderedCacheBehaviors"][0]["pathPattern"] == "/api/*"
     bad = run(enable_cloudfront="true", cloudfront_default_ttl="10", cloudfront_max_ttl="1")
     assert "TTLs must satisfy" in bad["error"]
+
+
+def test_remote_backend_and_kms_secrets():
+    project = (ROOT / "Pulumi.yaml").read_text()
+    assert "url: s3://idea-board-tfstate-326435482847/pulumi?region=ap-south-1" in project
+    stack = (ROOT / "Pulumi.prod.yaml").read_text()
+    assert "secretsprovider: awskms://alias/idea-board-pulumi?region=ap-south-1" in stack

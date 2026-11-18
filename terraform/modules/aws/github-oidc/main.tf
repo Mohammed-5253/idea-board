@@ -1,14 +1,14 @@
 # =============================================================================
 # MODULE aws/github-oidc – lets GitHub Actions log in to AWS WITHOUT stored keys
-# 1. OIDC provider: AWS trusts tokens issued by GitHub (token.actions.githubusercontent.com).
+# 1. OIDC provider (from terraform/bootstrap/aws): AWS trusts tokens issued by GitHub.
 # 2. IAM role: assumable ONLY by workflows of `github_repo` running on `main` (`sub` claim).
 #    Each run gets temporary credentials (~1 h); nothing to leak or rotate.
 # 3. Policy: push/pull images to the given ECR repositories only (least privilege),
 #    plus DescribeCluster on our EKS cluster (kubeconfig for CI verify-deploy).
 # =============================================================================
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
+# Created once per account by terraform/bootstrap/aws (an account can't hold two).
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 resource "aws_iam_role" "ci" {
@@ -17,7 +17,7 @@ resource "aws_iam_role" "ci" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
+      Principal = { Federated = data.aws_iam_openid_connect_provider.github.arn }
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {

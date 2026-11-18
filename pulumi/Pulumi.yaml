@@ -1,3 +1,6 @@
 name: idea-board-aws
 description: Idea Board on AWS (port of terraform/aws without EKS, ALB controller and Argo CD)
 runtime: python
+# State in the S3 bucket from terraform/bootstrap/aws (next to the Terraform state).
+backend:
+  url: s3://idea-board-tfstate-326435482847/pulumi?region=ap-south-1

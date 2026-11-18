@@ -66,6 +66,14 @@ export default function App() {
     );
   };
 
+  const handleEdited = (idea: Idea) => {
+    setState((prev) =>
+      prev.status === "ready"
+        ? { status: "ready", ideas: prev.ideas.map((i) => (i.id === idea.id ? idea : i)) }
+        : prev,
+    );
+  };
+
   return (
     <main className={styles.page}>
       <header className={styles.header}>
@@ -94,7 +102,7 @@ export default function App() {
           (state.ideas.length === 0 ? (
             <p className={styles.muted}>No ideas yet – be the first!</p>
           ) : (
-            <IdeaList ideas={state.ideas} />
+            <IdeaList ideas={state.ideas} onEdited={handleEdited} />
           ))}
       </section>
     </main>
